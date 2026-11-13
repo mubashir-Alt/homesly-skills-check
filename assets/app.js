@@ -603,7 +603,7 @@ function renderCheck(arg) {
     if (vid) { vid.className = "cam-big " + (s.camera === "ok" && fOk ? "ok" : s.camera === "ok" && s.face !== "loading" ? "bad" : ""); document.getElementById("ck-tag").textContent = s.camera === "ok" ? s.label : "Camera off"; document.getElementById("ck-empty").hidden = s.camera === "ok"; }
     const go = document.getElementById("ck-go"); if (go) go.disabled = !pr.ready();
   });
-  document.getElementById("ck-video").prepend(pr.video);
+  pr.attachPreview(document.getElementById("ck-video"));
   pr.startCamera();
 }
 

@@ -5,9 +5,9 @@ export interface Question {
   id: string; emp_key?: string; site: string; area: string; level: number; type: QType;
   prompt: string; code?: string | null; options?: string[] | null; answer?: number | number[] | null;
   rubric?: { model: string; points: string[] } | null; explanation?: string | null; source?: string | null;
-  ai?: boolean; factId?: string; correct?: string[];
+  ai?: boolean; factId?: string; correct?: string[]; week?: string | null;
 }
-export interface Fact { id: string; site: string; site_name?: string; area: string; fact: string; source?: string }
+export interface Fact { id: string; site: string; site_name?: string; area: string; fact: string; source?: string; week?: string | null }
 export interface Stats {
   seen_ids: string[]; wrong_ids: string[]; used_facts: string[]; recent_prompts: string[];
   area_stats: Record<string, { e: number; m: number }>; history: { date: string; pct: number; pending: number }[];
@@ -22,6 +22,15 @@ export const EMP_SITES: Record<string, string[]> = {
 export const EMP_NAMES: Record<string, string> = { harshith: "Harshith", sai: "Sai Lakshmi" };
 export const TEST_SIZE = 15, AI_COUNT = 4, MINUTES = 25, MAX_SHORT = 3;
 const LEVEL_MIX: Record<number, number> = { 1: 0.33, 2: 0.4, 3: 0.27 };
+/** Share of Friday's test drawn from that week's work. */
+export const WEEK_FOCUS = 0.8;
+
+/** Day of week (0 Sunday to 6 Saturday) and that week's Monday, for a YYYY-MM-DD date. */
+export function weekOf(date: string): { dow: number; monday: string } {
+  const d = new Date(date + "T00:00:00Z"); const dow = d.getUTCDay();
+  const m = new Date(d.getTime() - ((dow + 6) % 7) * 86_400_000);
+  return { dow, monday: m.toISOString().slice(0, 10) };
+}
 
 export function hash(str: string): number {
   let h1 = 0xdeadbeef, h2 = 0x41c6ce57;
@@ -57,7 +66,7 @@ export function validQuestion(q: Question): boolean {
 }
 
 /** Pick bank questions: unseen first, then wrong ones, then oldest seen; weak areas weighted up; spread over sites and levels. */
-export function selectFromBank(emp: string, bank: Question[], stats: Stats, n: number, rnd: () => number): Question[] {
+export function selectFromBank(emp: string, bank: Question[], stats: Stats, n: number, rnd: () => number, boost: (q: Question) => number = () => 1): Question[] {
   const seen = new Set(stats.seen_ids), wrong = new Set(stats.wrong_ids);
   const order = new Map(stats.seen_ids.map((id, i) => [id, i]));
   let pool = bank.filter((q) => !seen.has(q.id));
@@ -86,7 +95,7 @@ export function selectFromBank(emp: string, bank: Question[], stats: Stats, n: n
     while (picked.length < n && cand.length) {
       const ok = cand.filter((q) => fits(q, strict));
       if (!ok.length) break;
-      const w = ok.map((q) => (1 + 2 * (1 - accuracy(stats, q.area))) * (wrong.has(q.id) ? 1.5 : 1) * (seen.has(q.id) ? 0.6 : 1));
+      const w = ok.map((q) => (1 + 2 * (1 - accuracy(stats, q.area))) * (wrong.has(q.id) ? 1.5 : 1) * (seen.has(q.id) ? 0.6 : 1) * boost(q));
       const q = ok[weightedPick(ok, w, rnd)];
       picked.push(q);
       cnt.site[q.site] = (cnt.site[q.site] || 0) + 1; cnt.level[q.level] = (cnt.level[q.level] || 0) + 1;
@@ -97,13 +106,13 @@ export function selectFromBank(emp: string, bank: Question[], stats: Stats, n: n
   return picked;
 }
 
-export function pickFacts(facts: Fact[], stats: Stats, k: number, rnd: () => number): Fact[] {
+export function pickFacts(facts: Fact[], stats: Stats, k: number, rnd: () => number, boost: (f: Fact) => number = () => 1): Fact[] {
   const used = new Set(stats.used_facts);
   let pool = facts.filter((f) => !used.has(f.id));
   if (pool.length < k) pool = facts.slice();
   const picked: Fact[] = [];
   while (picked.length < k && pool.length) {
-    const i = weightedPick(pool, pool.map((f) => 1 + 2 * (1 - accuracy(stats, f.area))), rnd);
+    const i = weightedPick(pool, pool.map((f) => (1 + 2 * (1 - accuracy(stats, f.area))) * boost(f)), rnd);
     picked.push(pool[i]); pool.splice(i, 1);
   }
   return picked;
@@ -112,7 +121,7 @@ export function pickFacts(facts: Fact[], stats: Stats, k: number, rnd: () => num
 /** Shuffle options per test and remap the answer key. */
 export function prepare(q: Question, rnd: () => number): Question {
   const p: Question = JSON.parse(JSON.stringify(q));
-  delete p.emp_key;
+  delete p.emp_key; delete p.week;
   if ((p.type === "single" || p.type === "multi") && q.options) {
     const idx = shuffle(q.options.map((_, i) => i), rnd);
     p.options = idx.map((i) => q.options![i]);

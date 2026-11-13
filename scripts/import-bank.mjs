@@ -17,9 +17,9 @@ for (const emp of emps) {
   const res = await fetch(`${CONFIG.supabaseUrl}/functions/v1/api`, {
     method: "POST",
     headers: { "Content-Type": "application/json", "x-import-token": env.IMPORT_TOKEN, apikey: CONFIG.supabaseAnonKey },
-    body: JSON.stringify({ action: "import", emp, questions, sites: kb.sites, textbook }),
+    body: JSON.stringify({ action: "import", emp, questions, sites: kb.sites, weeks: kb.weeks || [], textbook }),
   });
   const out = await res.json().catch(() => ({}));
   if (!res.ok) { console.error(`${emp}: ${out.error || res.status}`); process.exitCode = 1; continue; }
-  console.log(`${emp}: ${out.questions} questions, ${out.facts} facts, ${out.sites} sites, ${out.textbookChapters} textbook chapters imported.`);
+  console.log(`${emp}: ${out.weeks} work weeks, ${out.questions} questions, ${out.facts} facts, ${out.sites} sites, ${out.textbookChapters} textbook chapters imported.`);
 }

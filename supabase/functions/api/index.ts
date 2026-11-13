@@ -3,7 +3,7 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import {
   AI_COUNT, MINUTES, TEST_SIZE, buildReview, computeScore, gradeAuto, hash, isAnswered, pickFacts, prepare,
-  publicView, rngFrom, selectFromBank, shuffle, updateStats, validQuestion,
+  publicView, rngFrom, selectFromBank, shuffle, updateStats, validQuestion, weekOf, WEEK_FOCUS,
   type Fact, type Grade, type Question, type Stats,
 } from "./engine.ts";
 import { markWrittenAnswers, writeFreshQuestions } from "./claude.ts";
@@ -20,6 +20,9 @@ const fail = (message: string, status = 400) => json({ error: message }, status)
 
 const admin: SupabaseClient = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!, { auth: { persistSession: false } });
 const today = () => new Intl.DateTimeFormat("en-CA", { timeZone: TIMEZONE, year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
+const hourNow = () => Number(new Intl.DateTimeFormat("en-GB", { timeZone: TIMEZONE, hour: "numeric", hourCycle: "h23" }).format(new Date()));
+/** Until this hour on Friday, wait for the weekly refresh rather than falling back to a general test. */
+const FRIDAY_WAIT_UNTIL = Number(Deno.env.get("FRIDAY_WAIT_UNTIL") || 13);
 
 async function caller(req: Request) {
   const token = (req.headers.get("Authorization") || "").replace(/^Bearer\s+/i, "");
@@ -65,20 +68,41 @@ async function start(user: NonNullable<Awaited<ReturnType<typeof caller>>>, body
   if (!bank.length) return fail("The question bank is empty. Ask your manager to import it.", 500);
   const stats = practice ? { seen_ids: [], wrong_ids: [], used_facts: [], recent_prompts: [], area_stats: {}, history: [] } : await loadStats(user.id, user.email, emp);
   const rnd = rngFrom(hash(`${emp}|${user.id}|${date}|${practice ? Date.now() : "daily"}`));
+  const allFacts = (factRows || []) as Fact[];
+
+  // Work weeks: Friday is about this week's Mon-Thu work; other days revise the latest weeks.
+  const { dow, monday } = weekOf(date);
+  const { data: weeks } = await admin.from("work_weeks").select("week").eq("emp_key", emp).order("week", { ascending: false }).limit(2);
+  const latest = weeks?.[0]?.week as string | undefined, previous = weeks?.[1]?.week as string | undefined;
+  const weekly = dow === 5 && latest === monday;
+  if (dow === 5 && !weekly && !practice && hourNow() < FRIDAY_WAIT_UNTIL) {
+    return fail(`This week's questions are still being prepared from GitHub. Friday's test opens once they're loaded, or at ${FRIDAY_WAIT_UNTIL}:00 at the latest.`, 409);
+  }
+  const boost = (x: { week?: string | null }) => (x.week && x.week === latest ? 2.5 : x.week && x.week === previous ? 1.5 : 1);
 
   let fresh: Question[] = [];
   try {
-    const facts = pickFacts((factRows || []) as Fact[], stats, AI_COUNT * 3, rnd);
+    const weekFacts = weekly ? allFacts.filter((f) => f.week === latest) : [];
+    const facts = weekFacts.length ? pickFacts(weekFacts, stats, AI_COUNT * 3, rnd) : pickFacts(allFacts, stats, AI_COUNT * 3, rnd, boost);
     fresh = (await writeFreshQuestions(emp, facts, stats.recent_prompts, AI_COUNT, date)).filter(validQuestion);
   } catch (e) { console.error("fresh questions failed", e); }
-  const picked = selectFromBank(emp, bank, stats, TEST_SIZE - fresh.length, rnd);
+  let picked: Question[];
+  if (weekly) {
+    const weekBank = bank.filter((q) => q.week === latest);
+    const nWeek = Math.min(weekBank.length, Math.max(0, Math.round(TEST_SIZE * WEEK_FOCUS) - fresh.length));
+    const fromWeek = selectFromBank(emp, weekBank, stats, nWeek, rnd);
+    const rest = selectFromBank(emp, bank.filter((q) => !fromWeek.includes(q)), stats, TEST_SIZE - fresh.length - fromWeek.length, rnd, boost);
+    picked = fromWeek.concat(rest);
+  } else {
+    picked = selectFromBank(emp, bank, stats, TEST_SIZE - fresh.length, rnd, boost);
+  }
   const questions = shuffle(picked.concat(fresh), rnd).sort((a, b) => a.level - b.level).map((q) => prepare(q, rnd));
 
   const startedAt = new Date();
   const row = {
     user_id: user.id, email: user.email, emp_key: emp, kind: practice ? "practice" : "daily", test_date: date,
     started_at: startedAt.toISOString(), deadline_at: new Date(startedAt.getTime() + MINUTES * 60_000).toISOString(),
-    questions, questions_public: questions.map(publicView),
+    questions, questions_public: questions.map(publicView), week: weekly ? latest : null,
   };
   const { data, error } = await admin.from("tests").insert(row).select("*").single();
   if (error) {
@@ -145,29 +169,34 @@ async function mark(user: NonNullable<Awaited<ReturnType<typeof caller>>>, body:
 }
 
 // ------------------------------------------------------------------ import (setup script + weekly refresh)
-async function importBank(req: Request, body: { emp: string; questions?: Question[]; sites?: Array<{ domain: string; name?: string; place?: string; stack?: string; summary?: string; facts?: Fact[] }> }) {
+async function importBank(req: Request, body: { emp: string; weeks?: Array<{ week: string; from?: string; to?: string; commits?: number; summary?: string; highlights?: string[]; newQuestions?: number }>; questions?: Question[]; sites?: Array<{ domain: string; name?: string; place?: string; stack?: string; summary?: string; facts?: Fact[] }> }) {
   const expected = Deno.env.get("IMPORT_TOKEN");
   if (!expected || req.headers.get("x-import-token") !== expected) return fail("Not allowed.", 401);
   if (!["harshith", "sai"].includes(body.emp)) return fail("Unknown employee.");
   const qs = (body.questions || []).map((q) => ({
     id: q.id, emp_key: body.emp, site: q.site, area: q.area, level: q.level, type: q.type, prompt: q.prompt, code: q.code ?? null,
     options: q.options ?? null, answer: q.answer ?? null, rubric: q.rubric ?? null, explanation: q.explanation ?? null,
-    source: q.source ?? null, retired: !!(q as { retired?: boolean }).retired, updated_at: new Date().toISOString(),
+    source: q.source ?? null, retired: !!(q as { retired?: boolean }).retired, week: q.week ?? null, updated_at: new Date().toISOString(),
   }));
   const invalid = qs.filter((q) => !q.retired && !validQuestion(q as Question)).map((q) => q.id);
   if (invalid.length) return fail(`Invalid questions: ${invalid.join(", ")}`);
-  const facts = (body.sites || []).flatMap((s) => (s.facts || []).map((f) => ({ id: f.id, emp_key: body.emp, site: s.domain, site_name: s.name ?? null, area: f.area, fact: f.fact, source: f.source ?? null, updated_at: new Date().toISOString() })));
+  const facts = (body.sites || []).flatMap((s) => (s.facts || []).map((f) => ({ id: f.id, emp_key: body.emp, site: s.domain, site_name: s.name ?? null, area: f.area, fact: f.fact, source: f.source ?? null, week: f.week ?? null, updated_at: new Date().toISOString() })));
   const sites = (body.sites || []).map((s) => ({ domain: s.domain, emp_key: body.emp, name: s.name ?? null, place: s.place ?? null, stack: s.stack ?? null, summary: s.summary ?? null }));
   for (let i = 0; i < qs.length; i += 200) { const { error } = await admin.from("questions").upsert(qs.slice(i, i + 200)); if (error) return fail(error.message, 500); }
   for (let i = 0; i < facts.length; i += 200) { const { error } = await admin.from("facts").upsert(facts.slice(i, i + 200)); if (error) return fail(error.message, 500); }
   if (sites.length) { const { error } = await admin.from("site_info").upsert(sites); if (error) return fail(error.message, 500); }
+  const weeks = (body.weeks || []).filter((w) => /^\d{4}-\d{2}-\d{2}$/.test(w.week)).map((w) => ({
+    emp_key: body.emp, week: w.week, from_date: w.from ?? null, to_date: w.to ?? null, commits: w.commits ?? 0,
+    summary: w.summary ?? null, highlights: w.highlights ?? [], new_questions: w.newQuestions ?? 0, loaded_at: new Date().toISOString(),
+  }));
+  if (weeks.length) { const { error } = await admin.from("work_weeks").upsert(weeks); if (error) return fail(error.message, 500); }
   const book = (body as { textbook?: { chapters?: unknown[] } }).textbook;
   if (book) {
     if (!Array.isArray(book.chapters) || !book.chapters.length) return fail("Textbook has no chapters.");
     const { error } = await admin.from("textbooks").upsert({ emp_key: body.emp, data: book, updated_at: new Date().toISOString() });
     if (error) return fail(error.message, 500);
   }
-  return json({ ok: true, questions: qs.length, facts: facts.length, sites: sites.length, textbookChapters: book?.chapters?.length || 0 });
+  return json({ ok: true, weeks: weeks.length, questions: qs.length, facts: facts.length, sites: sites.length, textbookChapters: book?.chapters?.length || 0 });
 }
 
 Deno.serve(async (req) => {

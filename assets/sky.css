@@ -192,3 +192,10 @@ a{color:var(--accent)}
 .toc a{border-radius:14px}
 .keybox{border-radius:18px}
 .cam-big .empty-cam,.cam-strikes{color:#A2B8CB} .cam-big .note,.cam-meta{color:#DCEAF5}
+
+/* Weekly work card */
+.week-card{background:linear-gradient(135deg,var(--surface),color-mix(in srgb,var(--sun) 10%,var(--surface)))}
+.week-hl{margin:4px 0 0;padding:0;list-style:none;display:grid;gap:8px}
+.week-hl li{position:relative;padding:10px 14px 10px 34px;border-radius:16px;background:var(--raised);font-size:14px}
+.week-hl li::before{content:"";position:absolute;left:14px;top:17px;width:8px;height:8px;border-radius:50%;background:var(--sun)}
+.week-mini{padding:16px;border-radius:18px;background:var(--raised);border:1px solid var(--line)}

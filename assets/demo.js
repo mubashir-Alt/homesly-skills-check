@@ -53,6 +53,15 @@ function grade(q, a) {
   return 0;
 }
 const me = () => store.staff.find((s) => s.email === store.session?.user.email);
+// Demo work week: this week's Monday, as if the Friday refresh had run.
+function demoWeeks() {
+  const d = new Date(today() + "T00:00:00Z"); const mon = new Date(d.getTime() - ((d.getUTCDay() + 6) % 7) * 86400000).toISOString().slice(0, 10);
+  const plus = (n) => new Date(new Date(mon + "T00:00:00Z").getTime() + n * 86400000).toISOString().slice(0, 10);
+  return [
+    { emp_key: "harshith", week: mon, from_date: mon, to_date: plus(3), commits: 14, new_questions: 12, loaded_at: new Date().toISOString(), summary: "Demo week: faster hero images on The George, a fixed booking popup on the County Hotel and new FAQ schema on the Hampton.", highlights: ["Converted hero images to WebP and added width/height", "Fixed the Book Now popup closing on iPhone", "Added FAQPage schema to the Hampton FAQ page"] },
+    { emp_key: "sai", week: mon, from_date: mon, to_date: plus(3), commits: 9, new_questions: 10, loaded_at: new Date().toISOString(), summary: "Demo week: a new enquiry form on Coach House and cookie-consent fixes on Central Hotel.", highlights: ["Built the group-booking enquiry form", "Consent Mode now waits for the banner choice"] },
+  ];
+}
 const DEMO_BOOK = (emp) => ({
   title: "Demo study guide", intro: "This is **demo mode**. The real textbook loads from the server once it's imported.\n\nRead one chapter a day before your test. Each chapter ends with a short self-check.",
   syllabus: [{ area: "leads-booking", weight: 30, topics: ["Booking popup", "CRM webhooks"] }, { area: "speed", weight: 25, topics: ["WebP images", "Font loading"] }, { area: "seo", weight: 20, topics: ["Hotel schema", "Titles"] }, { area: "consent-tracking", weight: 15, topics: ["Cookie consent"] }, { area: "mobile-ux", weight: 10, topics: ["Tap targets"] }],
@@ -76,13 +85,14 @@ export const demoApi = {
     return store.staff[1];
   },
   async loadEmployee(uid, emp) {
+    const weeks = demoWeeks().filter((w) => w.emp_key === emp);
     const sites = { harshith: [["thegeorgehotel.uk", "The George Hotel", "Montrose"], ["stationhotelportsoy.co.uk", "Station Hotel", "Portsoy"], ["countyselkirk.com", "County Hotel", "Selkirk"], ["thehamptonhotel.co.uk", "The Hampton Hotel", "Llandrindod Wells"], ["thewoodmaninnburneston.com", "The Woodman Inn", "Burneston"]], sai: [["homeslystays.com", "Homesly Stays", "Berwick-upon-Tweed"], ["coachhouseotterburn.co.uk", "Coach House", "Otterburn"], ["centralhotel.uk", "Central Hotel", "Gloucester"]] }[emp];
     const facts = sites.flatMap(([d], i) => AREA_KEYS.slice(0, 5).map((a, j) => ({ id: `${d}-${j}`, site: d, area: a, fact: `Demo note ${j + 1} for ${d}: the real study notes show here once the knowledge base is imported.`, source: "Demo" })));
-    return { books: [{ emp_key: emp, data: DEMO_BOOK(emp) }], reads: demoReads, stats: stats[emp], tests: store.tests.filter((t) => t.emp_key === emp).sort((a, b) => b.test_date.localeCompare(a.test_date)), facts, sites: sites.map(([domain, name, place]) => ({ domain, name, place, summary: "Demo summary. The real site summary comes from the knowledge base.", stack: "WordPress, Elementor, WPCode, Cloudbeds, GoHighLevel" })) };
+    return { weeks, books: [{ emp_key: emp, data: DEMO_BOOK(emp) }], reads: demoReads, stats: stats[emp], tests: store.tests.filter((t) => t.emp_key === emp).sort((a, b) => b.test_date.localeCompare(a.test_date)), facts, sites: sites.map(([domain, name, place]) => ({ domain, name, place, summary: "Demo summary. The real site summary comes from the knowledge base.", stack: "WordPress, Elementor, WPCode, Cloudbeds, GoHighLevel" })) };
   },
   async loadManager() {
     const bank = []; ["harshith", "sai"].forEach((emp, k) => { for (let i = 0; i < (emp === "harshith" ? 98 : 90); i++) bank.push({ id: emp + i, emp_key: emp, site: emp === "harshith" ? ["thegeorgehotel.uk", "stationhotelportsoy.co.uk", "countyselkirk.com", "thehamptonhotel.co.uk", "thewoodmaninnburneston.com", "core"][i % 6] : ["homeslystays.com", "coachhouseotterburn.co.uk", "centralhotel.uk", "core"][i % 4], area: AREA_KEYS[(i * 3 + k) % 8], level: (i % 3) + 1, type: i % 5 === 0 ? "short" : "single", retired: false }); });
-    return { books: [{ emp_key: "harshith", data: DEMO_BOOK("harshith") }, { emp_key: "sai", data: DEMO_BOOK("sai") }], reads: [], staff: store.staff, tests: store.tests.slice().sort((a, b) => b.test_date.localeCompare(a.test_date)), stats: [stats.harshith, stats.sai], bank };
+    return { weeks: demoWeeks(), books: [{ emp_key: "harshith", data: DEMO_BOOK("harshith") }, { emp_key: "sai", data: DEMO_BOOK("sai") }], reads: [], staff: store.staff, tests: store.tests.slice().sort((a, b) => b.test_date.localeCompare(a.test_date)), stats: [stats.harshith, stats.sai], bank };
   },
   async getTest(id) { return store.tests.find((t) => t.id === id) || null; },
   async start(practiceAs) {

@@ -82,7 +82,7 @@ if (!DEMO) {
   const { createClient } = await import("https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/+esm");
   sb = createClient(CONFIG.supabaseUrl, CONFIG.supabaseAnonKey, { auth: { persistSession: true, detectSessionInUrl: true, flowType: "pkce" } });
 }
-const LIGHT_TEST = "id,user_id,email,emp_key,kind,test_date,status,started_at,deadline_at,submitted_at,score";
+const LIGHT_TEST = "id,user_id,email,emp_key,kind,test_date,status,started_at,deadline_at,submitted_at,score,week";
 const FULL_TEST = LIGHT_TEST + ",auto_submitted,questions_public,answers,conf,flags,integrity,cur,grades,review";
 
 async function callApi(body) {
@@ -111,26 +111,28 @@ const API = DEMO ? null : {
   async session() { const { data } = await sb.auth.getSession(); return data.session; },
   async myStaff(email) { return must(await sb.from("staff").select("*").eq("email", email).maybeSingle()); },
   async loadEmployee(uid, emp) {
-    const [stats, tests, facts, sites, books, reads] = await Promise.all([
+    const [stats, tests, facts, sites, books, reads, weeks] = await Promise.all([
       sb.from("learner_stats").select("*").eq("user_id", uid).maybeSingle().then(must),
       sb.from("tests").select(LIGHT_TEST).eq("user_id", uid).order("test_date", { ascending: false }).limit(120).then(must),
       sb.from("facts").select("id,site,site_name,area,fact,source").eq("emp_key", emp).then(must),
       sb.from("site_info").select("*").eq("emp_key", emp).then(must),
       sb.from("textbooks").select("emp_key,data").eq("emp_key", emp).then(must),
       sb.from("reading_progress").select("chapter_id,read_at").eq("user_id", uid).then(must),
+      sb.from("work_weeks").select("*").eq("emp_key", emp).order("week", { ascending: false }).limit(6).then(must),
     ]);
-    return { stats, tests: tests || [], facts: facts || [], sites: sites || [], books: books || [], reads: reads || [] };
+    return { stats, tests: tests || [], facts: facts || [], sites: sites || [], books: books || [], reads: reads || [], weeks: weeks || [] };
   },
   async loadManager() {
-    const [staff, tests, stats, bank, books, reads] = await Promise.all([
+    const [staff, tests, stats, bank, books, reads, weeks] = await Promise.all([
       sb.from("staff").select("*").order("role").then(must),
       sb.from("tests").select(LIGHT_TEST + ",integrity").order("test_date", { ascending: false }).limit(500).then(must),
       sb.from("learner_stats").select("*").then(must),
       sb.from("questions").select("id,emp_key,site,area,level,type,retired").then(must),
       sb.from("textbooks").select("emp_key,data").then(must),
       sb.from("reading_progress").select("user_id,email,chapter_id,read_at").then(must),
+      sb.from("work_weeks").select("*").order("week", { ascending: false }).limit(20).then(must),
     ]);
-    return { staff: staff || [], tests: tests || [], stats: stats || [], bank: bank || [], books: books || [], reads: reads || [] };
+    return { staff: staff || [], tests: tests || [], stats: stats || [], bank: bank || [], books: books || [], reads: reads || [], weeks: weeks || [] };
   },
   async markRead(chapterId) { must(await sb.from("reading_progress").upsert({ user_id: S.user.id, email: S.user.email, chapter_id: chapterId, read_at: new Date().toISOString() })); },
   async getTest(id) { return must(await sb.from("tests").select(FULL_TEST).eq("id", id).maybeSingle()); },
@@ -350,6 +352,23 @@ function metrics(history) {
   const best = hist.reduce((m, x) => Math.max(m, x.pct), 0);
   return { avg7, delta: avg7 != null && avgPrev != null ? avg7 - avgPrev : null, streak, count: hist.length, best };
 }
+/* ---- work weeks (filled every Friday from GitHub) ---- */
+const addDays = (k, n) => new Date(new Date(k + "T00:00:00Z").getTime() + n * 86400000).toISOString().slice(0, 10);
+function weekState(emp) {
+  const weeks = (S.data.weeks || []).filter((w) => w.emp_key === emp).sort((a, b) => b.week.localeCompare(a.week));
+  const k = localDate(); const dow = new Date(k + "T00:00:00Z").getUTCDay(); const monday = addDays(k, -((dow + 6) % 7));
+  return { latest: weeks[0] || null, friday: dow === 5, loadedThisWeek: weeks[0]?.week === monday };
+}
+const weekRange = (w) => `${fmtDay(w.from_date || w.week, { weekday: "short", day: "numeric", month: "short" })} to ${fmtDay(w.to_date || addDays(w.week, 3), { weekday: "short", day: "numeric", month: "short" })}`;
+function weekCard(w, { title, note } = {}) {
+  if (!w) return "";
+  const hl = Array.isArray(w.highlights) ? w.highlights : [];
+  return `<section class="card stack-s week-card"><div class="card-h" style="margin-bottom:4px"><div><span class="eyebrow">From GitHub · ${h(weekRange(w))}</span><h3 style="margin-top:4px">${h(title || "What you worked on")}</h3></div>
+    <div class="row" style="gap:6px"><span class="chip accent">${w.commits || 0} commit${w.commits === 1 ? "" : "s"}</span><span class="chip gold">${w.new_questions || 0} new questions</span></div></div>
+    ${w.summary ? `<p class="ink2">${h(w.summary)}</p>` : ""}
+    ${hl.length ? `<ul class="week-hl">${hl.slice(0, 6).map((x) => `<li>${h(x)}</li>`).join("")}</ul>` : ""}
+    ${note ? `<p class="small muted">${note}</p>` : ""}</section>`;
+}
 function journey(t) {
   const readToday = (S.data.reads || []).some((r) => r.read_at && localDate(new Date(r.read_at)) === localDate());
   const cur = t && t.status === "done" ? 4 : t && t.status === "in_progress" ? 3 : readToday ? 2 : 1;
@@ -358,7 +377,7 @@ function journey(t) {
 }
 function renderOverview() {
   const emp = EMPLOYEES[S.staff.emp_key]; const st = S.data.stats || {}; const hist = st.history || []; const m = metrics(hist);
-  const t = todayTest(); const now = Date.now();
+  const t = todayTest(); const now = Date.now(); const ws = weekState(S.staff.emp_key);
   let hero;
   if (t && t.status === "done") {
     const [bl] = band(t.score.pct);
@@ -371,6 +390,17 @@ function renderOverview() {
     hero = `<span class="eyebrow">In progress</span><h2>Pick up where you left off.</h2>
       <p>${left > 0 ? `${fmtClock(left)} left on the clock. Your answers so far are saved.` : "Time ran out. Your saved answers will be submitted now."}</p>
       <div class="row"><button class="btn primary lg" data-act="resume" data-id="${t.id}">${left > 0 ? "Resume assessment" : "Submit and see results"} ${ICON.right}</button></div>`;
+  } else if (ws.friday && ws.loadedThisWeek) {
+    hero = `<span class="eyebrow">Weekly test · your work from ${h(weekRange(ws.latest))}</span>
+      <h2>This week's test, ${h(firstName(emp.name))}.</h2>
+      <p>About 12 of the 15 questions are about what you pushed to GitHub this week, Monday to Thursday. The rest revise earlier work.</p>
+      <div class="hero-meta"><div><b>${TEST_SIZE}</b><span>questions</span></div><div><b>${MINUTES} min</b><span>time limit</span></div><div><b>${ws.latest.commits || 0}</b><span>commits this week</span></div><div><b>${ws.latest.new_questions || 0}</b><span>new questions</span></div></div>
+      <div class="row"><button class="btn primary lg" data-act="start">${ICON.play} Start weekly test</button><a class="btn ghost" href="#/textbook">Open my textbook</a></div>`;
+  } else if (ws.friday) {
+    hero = `<span class="eyebrow">Weekly test · ${h(fmtDay(localDate(), { weekday: "long", day: "numeric", month: "long" }))}</span>
+      <h2>This week's questions are on their way.</h2>
+      <p>Every Friday morning the questions are built from what you pushed to GitHub Monday to Thursday. The test opens as soon as they're loaded, and by 13:00 at the latest. Meanwhile, read a chapter.</p>
+      <div class="row"><button class="btn primary lg" data-act="start">${ICON.play} Try to start</button><a class="btn ghost" href="#/textbook">Open my textbook</a></div>`;
   } else {
     hero = `<span class="eyebrow">Today's assessment · ${h(fmtDay(localDate(), { weekday: "long", day: "numeric", month: "long" }))}</span>
       <h2>Ready when you are, ${h(firstName(emp.name))}.</h2>
@@ -386,6 +416,7 @@ function renderOverview() {
     ${journey(t)}
     <div class="stack" style="gap:20px">
       <section class="hero stack">${hero}</section>
+      ${weekCard(ws.latest, ws.friday && ws.loadedThisWeek ? { title: "What this week's test is about", note: "Missed something? The matching textbook chapter covers it." } : { title: "What you worked on last week", note: "Your daily tests until next Friday keep revising this, mixed with earlier topics." })}
       ${(() => { const book = bookFor(S.staff.emp_key); if (!book) return ""; const reads = readSet(S.staff.emp_key); const sug = suggestedChapter(book, reads, st.area_stats); const done = book.chapters.filter((c) => reads.has(c.id)).length;
         return `<section class="card row" style="gap:18px"><span class="avatar lg" style="border-radius:12px">${ICON.book.replace("<svg", '<svg style="width:20px;height:20px"')}</span>
           <div class="grow" style="min-width:220px"><span class="eyebrow">Textbook · ${done} of ${book.chapters.length} chapters read</span><div style="font-weight:500;margin-top:2px">${sug ? `Suggested next: ${h(sug.title)}` : "You've read every chapter. Revisit the ones covering your weaker areas."}</div><div class="xs muted">${sug ? `Covers ${(sug.areas || []).map((a) => AREAS[a] || a).join(", ")} · ${sug.minutes || "–"} min` : ""}</div></div>
@@ -412,7 +443,7 @@ function resultRow(t, who) {
   const [bl, bc] = band(t.score?.pct || 0);
   return `<a class="li click" href="#/results/${t.id}" style="text-decoration:none;color:inherit">
     <div class="avatar" style="background:var(--${bc}-soft);color:var(--${bc})">${t.score?.pct ?? "–"}</div>
-    <div class="grow"><b style="font-weight:500">${who ? h(who) + " · " : ""}${h(fmtDay(t.test_date, { weekday: "long", day: "numeric", month: "short" }))}</b><div class="xs muted">${bl}${t.score?.pending ? ` · ${t.score.pending} written answer${t.score.pending > 1 ? "s" : ""} awaiting marking` : ""}${t.kind === "practice" ? " · practice" : ""}</div></div>
+    <div class="grow"><b style="font-weight:500">${who ? h(who) + " · " : ""}${h(fmtDay(t.test_date, { weekday: "long", day: "numeric", month: "short" }))}</b>${t.week ? ' <span class="chip accent" style="height:20px;font-size:11px">Weekly</span>' : ""}<div class="xs muted">${bl}${t.score?.pending ? ` · ${t.score.pending} written answer${t.score.pending > 1 ? "s" : ""} awaiting marking` : ""}${t.kind === "practice" ? " · practice" : ""}</div></div>
     ${ICON.right.replace("<svg", '<svg style="width:16px;height:16px;color:var(--muted)"')}</a>`;
 }
 
@@ -842,6 +873,11 @@ function renderTeam() {
         ${kpi("Question bank", `${S.data.bank.filter((q) => !q.retired).length}`, "Plus 4 fresh questions per person daily")}
       </div>
       <div class="grid g-2">${emps.map(personCard).join("")}</div>
+      <section class="card"><div class="card-h"><div><h3>Weekly work from GitHub</h3><p class="xs muted" style="margin-top:2px">Loaded every Friday morning. Friday's test is about 80% this week's work; weekdays revise it.</p></div></div>
+        <div class="grid g-2">${emps.map(({ e }) => { const ws = weekState(e.key); const w = ws.latest;
+          return `<div class="stack-s week-mini"><div class="row between"><b>${h(e.name)}</b>${ws.loadedThisWeek ? '<span class="chip good">This week loaded</span>' : ws.friday ? '<span class="chip warn">Not loaded yet</span>' : w ? '<span class="chip">Last week</span>' : ""}</div>
+            ${w ? `<span class="xs muted">${h(weekRange(w))} · ${w.commits || 0} commits · ${w.new_questions || 0} new questions · loaded ${h(new Date(w.loaded_at).toLocaleString(undefined, { weekday: "short", hour: "numeric", minute: "2-digit" }))}</span>
+              ${w.summary ? `<p class="small ink2">${h(w.summary)}</p>` : ""}` : '<p class="small muted">Nothing loaded yet. The first Friday refresh adds it.</p>'}</div>`; }).join("")}</div></section>
       <section class="card"><div class="card-h"><h3>Latest results</h3></div>
         ${recent.length ? `<div class="list">${recent.map((t) => resultRow(t, S.data.staff.find((s) => s.email === t.email)?.full_name || EMPLOYEES[t.emp_key]?.name)).join("")}</div>` : `<div class="empty">Results appear here once your team takes their first assessment.</div>`}</section>
     </div>`);

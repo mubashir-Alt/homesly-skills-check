@@ -82,7 +82,11 @@ const must = ({ data, error }) => { if (error) throw new Error(error.message); r
 const API = DEMO ? null : {
   async signIn(email) {
     const { error } = await sb.auth.signInWithOtp({ email, options: { emailRedirectTo: location.origin + location.pathname, shouldCreateUser: true } });
-    if (error) throw new Error(/homeslystays|Database error/i.test(error.message) ? `Only @${DOMAIN} addresses can sign in.` : error.message);
+    if (error) {
+      if (/homeslystays|Database error/i.test(error.message)) throw new Error(`Only @${DOMAIN} addresses can sign in.`);
+      if (/rate limit/i.test(error.message)) throw new Error("Too many sign-in emails were sent in the last hour. Wait a while and try again. If this keeps happening, the site's email sender needs setting up.");
+      throw new Error(error.message);
+    }
   },
   async signOut() { await sb.auth.signOut(); },
   async session() { const { data } = await sb.auth.getSession(); return data.session; },

@@ -53,6 +53,15 @@ function grade(q, a) {
   return 0;
 }
 const me = () => store.staff.find((s) => s.email === store.session?.user.email);
+const DEMO_BOOK = (emp) => ({
+  title: "Demo study guide", intro: "This is **demo mode**. The real textbook loads from the server once it's imported.\n\nRead one chapter a day before your test. Each chapter ends with a short self-check.",
+  syllabus: [{ area: "leads-booking", weight: 30, topics: ["Booking popup", "CRM webhooks"] }, { area: "speed", weight: 25, topics: ["WebP images", "Font loading"] }, { area: "seo", weight: 20, topics: ["Hotel schema", "Titles"] }, { area: "consent-tracking", weight: 15, topics: ["Cookie consent"] }, { area: "mobile-ux", weight: 10, topics: ["Tap targets"] }],
+  chapters: [
+    { id: emp + "-d1", site: "core", title: "How a booking becomes a lead", summary: "Why Book buttons open a popup first.", minutes: 6, areas: ["leads-booking"], sections: [{ heading: "The idea", body: "When a guest clicks **Book now**, the site opens a short form before the booking engine.\n\n- The guest's details reach the CRM even if they don't finish booking.\n- The popup can show which room they picked.", keyPoints: ["Capture the lead before the guest leaves the site"], code: { lang: "js", snippet: "document.querySelectorAll('.book-now').forEach(b => b.addEventListener('click', openPopup));", caption: "Every Book button opens the same popup." } }], checklist: ["Click every Book button on a phone"], glossary: [{ term: "Lead", definition: "A guest's contact details saved in the CRM." }], selfCheck: [{ q: "What is lost if Book buttons go straight to the booking engine?", a: "Guests who abandon the booking leave no contact details, so the team can't follow up." }] },
+    { id: emp + "-d2", site: "core", title: "Fast pages on phones", summary: "Images, fonts and scripts.", minutes: 5, areas: ["speed"], sections: [{ heading: "What slows a phone down", body: "Large photos, unused fonts and blocking scripts.", keyPoints: ["Serve WebP", "Load only needed fonts"] }], checklist: [], glossary: [], selfCheck: [] },
+  ],
+});
+const demoReads = [];
 
 export const demoApi = {
   async signIn(email) { store.session = { user: { id: (email.split("@")[0].startsWith("sai") ? "sai" : email.startsWith("manager") || email.startsWith("support") ? "manager" : "harshith") + "-uid", email } }; },
@@ -69,11 +78,11 @@ export const demoApi = {
   async loadEmployee(uid, emp) {
     const sites = { harshith: [["thegeorgehotel.uk", "The George Hotel", "Montrose"], ["stationhotelportsoy.co.uk", "Station Hotel", "Portsoy"], ["countyselkirk.com", "County Hotel", "Selkirk"], ["thehamptonhotel.co.uk", "The Hampton Hotel", "Llandrindod Wells"], ["thewoodmaninnburneston.com", "The Woodman Inn", "Burneston"]], sai: [["homeslystays.com", "Homesly Stays", "Berwick-upon-Tweed"], ["coachhouseotterburn.co.uk", "Coach House", "Otterburn"], ["centralhotel.uk", "Central Hotel", "Gloucester"]] }[emp];
     const facts = sites.flatMap(([d], i) => AREA_KEYS.slice(0, 5).map((a, j) => ({ id: `${d}-${j}`, site: d, area: a, fact: `Demo note ${j + 1} for ${d}: the real study notes show here once the knowledge base is imported.`, source: "Demo" })));
-    return { stats: stats[emp], tests: store.tests.filter((t) => t.emp_key === emp).sort((a, b) => b.test_date.localeCompare(a.test_date)), facts, sites: sites.map(([domain, name, place]) => ({ domain, name, place, summary: "Demo summary. The real site summary comes from the knowledge base.", stack: "WordPress, Elementor, WPCode, Cloudbeds, GoHighLevel" })) };
+    return { books: [{ emp_key: emp, data: DEMO_BOOK(emp) }], reads: demoReads, stats: stats[emp], tests: store.tests.filter((t) => t.emp_key === emp).sort((a, b) => b.test_date.localeCompare(a.test_date)), facts, sites: sites.map(([domain, name, place]) => ({ domain, name, place, summary: "Demo summary. The real site summary comes from the knowledge base.", stack: "WordPress, Elementor, WPCode, Cloudbeds, GoHighLevel" })) };
   },
   async loadManager() {
     const bank = []; ["harshith", "sai"].forEach((emp, k) => { for (let i = 0; i < (emp === "harshith" ? 98 : 90); i++) bank.push({ id: emp + i, emp_key: emp, site: emp === "harshith" ? ["thegeorgehotel.uk", "stationhotelportsoy.co.uk", "countyselkirk.com", "thehamptonhotel.co.uk", "thewoodmaninnburneston.com", "core"][i % 6] : ["homeslystays.com", "coachhouseotterburn.co.uk", "centralhotel.uk", "core"][i % 4], area: AREA_KEYS[(i * 3 + k) % 8], level: (i % 3) + 1, type: i % 5 === 0 ? "short" : "single", retired: false }); });
-    return { staff: store.staff, tests: store.tests.slice().sort((a, b) => b.test_date.localeCompare(a.test_date)), stats: [stats.harshith, stats.sai], bank };
+    return { books: [{ emp_key: "harshith", data: DEMO_BOOK("harshith") }, { emp_key: "sai", data: DEMO_BOOK("sai") }], reads: [], staff: store.staff, tests: store.tests.slice().sort((a, b) => b.test_date.localeCompare(a.test_date)), stats: [stats.harshith, stats.sai], bank };
   },
   async getTest(id) { return store.tests.find((t) => t.id === id) || null; },
   async start(practiceAs) {
@@ -87,6 +96,7 @@ export const demoApi = {
     store.tests.push(t); return t;
   },
   async save() { return true; },
+  async markRead(ch) { if (!demoReads.some((r) => r.chapter_id === ch)) demoReads.push({ chapter_id: ch, read_at: new Date().toISOString() }); },
   async submit(x, auto) {
     const t = store.tests.find((y) => y.id === x.id); Object.assign(t, { answers: x.answers, conf: x.conf, flags: x.flags, integrity: x.integrity });
     await new Promise((r) => setTimeout(r, 900));

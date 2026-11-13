@@ -1,0 +1,106 @@
+/* Theme switch, pre-exam check, proctoring, integrity report, textbook. Uses the tokens from styles.css. */
+
+/* ---------- theme switch ---------- */
+.theme-btn{display:inline-flex;align-items:center;gap:6px;height:34px;padding:0 10px;border-radius:9px;border:1px solid var(--line-2);background:var(--surface);color:var(--ink-2);cursor:pointer;font-size:12.5px;font-weight:500;white-space:nowrap}
+.theme-btn svg{width:15px;height:15px}
+.side .theme-btn{background:var(--side-2);border-color:var(--side-line);color:var(--side-ink);width:100%;justify-content:flex-start}
+.auth-theme{position:absolute;top:calc(16px + env(safe-area-inset-top,0px));right:max(16px,env(safe-area-inset-right,0px));z-index:5}
+.auth-form{position:relative}
+
+/* ---------- pre-exam check ---------- */
+.check{display:grid;grid-template-columns:minmax(0,1.25fr) minmax(0,1fr);gap:32px;align-items:start}
+@media (max-width:900px){.check{grid-template-columns:1fr}}
+.check-item{display:flex;align-items:center;gap:14px;padding:14px 16px;background:var(--surface);border:1px solid var(--line);border-radius:14px}
+.check-item .st{width:28px;height:28px;border-radius:50%;display:grid;place-items:center;flex:none;background:var(--sunk);color:var(--muted)}
+.check-item .st svg{width:15px;height:15px}
+.check-item.ok .st{background:var(--good-soft);color:var(--good)}
+.check-item.bad .st{background:var(--bad-soft);color:var(--bad)}
+.check-item.wait .st{background:var(--warn-soft);color:var(--warn)}
+.cam-big{position:relative;aspect-ratio:4/3;border-radius:20px;overflow:hidden;background:#0C2420;border:2px solid transparent}
+.cam-big.ok{border-color:#3CC29A}
+.cam-big.bad{border-color:var(--bad)}
+.cam-video{width:100%;height:100%;object-fit:cover;transform:scaleX(-1);display:block}
+.cam-big .tag{position:absolute;left:12px;top:12px;display:flex;align-items:center;gap:8px;padding:6px 10px;border-radius:999px;background:rgba(0,0,0,.55);color:#fff;font-size:12px}
+.cam-big .tag i{width:8px;height:8px;border-radius:50%;background:#F0B35A}
+.cam-big.ok .tag i{background:#3CC29A}
+.cam-big.bad .tag i{background:#F28B80}
+.cam-big .note{position:absolute;right:12px;bottom:12px;padding:5px 9px;border-radius:999px;background:rgba(0,0,0,.55);color:#DDF0E9;font-size:11.5px}
+.cam-big .empty-cam{position:absolute;inset:0;display:grid;place-items:center;color:#9FC8BA;font-size:14px;text-align:center;padding:20px}
+.rules{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px 20px;font-size:14px;color:var(--ink-2)}
+@media (max-width:640px){.rules{grid-template-columns:1fr}}
+
+/* ---------- camera dock during the exam ---------- */
+.cam-dock{position:fixed;z-index:60;right:max(16px,env(safe-area-inset-right,0px));bottom:calc(76px + env(safe-area-inset-bottom,0px));width:188px;border-radius:14px;overflow:hidden;background:#0C2420;box-shadow:var(--shadow-lg);border:2px solid #3CC29A}
+.cam-dock.bad{border-color:#F28B80}
+.cam-frame{aspect-ratio:4/3;background:#071311}
+.cam-meta{display:flex;align-items:center;gap:6px;padding:6px 8px;font-size:11px;color:#DDF0E9;background:#0C2420}
+.cam-dot{width:7px;height:7px;border-radius:50%;background:#3CC29A;flex:none}
+.cam-dock.bad .cam-dot{background:#F28B80}
+.cam-label{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.cam-strikes{font-family:var(--f-mono);color:#9FC8BA}
+@media (max-width:640px){.cam-dock{width:120px;bottom:calc(72px + env(safe-area-inset-bottom,0px))} .cam-meta .cam-label{display:none}}
+
+/* ---------- proctor alarms ---------- */
+.proctor-back{position:fixed;inset:0;z-index:95;background:rgba(4,10,9,.74);display:grid;place-items:center;padding:16px}
+.proctor-modal{width:100%;max-width:520px;background:var(--surface);color:var(--ink);border-radius:22px;padding:26px;display:flex;flex-direction:column;gap:16px;border:1px solid color-mix(in srgb,var(--bad) 45%,transparent);box-shadow:0 0 0 6px color-mix(in srgb,var(--bad) 14%,transparent),var(--shadow-lg)}
+.pm-icon{width:44px;height:44px;border-radius:12px;background:var(--bad-soft);color:var(--bad);display:grid;place-items:center;flex:none}
+.pm-icon svg{width:22px;height:22px}
+.pm-title{font-size:20px;font-weight:600}
+.pm-sub{font-size:13.5px;color:var(--muted)}
+.pm-p{font-size:14px;color:var(--ink-2)}
+.pm-cam{aspect-ratio:16/9;border-radius:14px;overflow:hidden;background:#071311;border:2px solid var(--bad)}
+.pm-cam.ok{border-color:#3CC29A}
+.pm-state{font-size:13px;font-weight:500}
+.pm-state.bad{color:var(--bad)}
+.pm-state.ok{color:var(--good)}
+.strike-row{display:flex;align-items:center;gap:4px}
+.strike-row i{flex:1;height:6px;border-radius:3px;background:var(--line-2)}
+.strike-row i.on{background:var(--bad)}
+.strike-row span{margin-left:8px;font:500 12.5px var(--f-mono);color:var(--bad)}
+@media (prefers-reduced-motion:no-preference){.proctor-modal{animation:pmIn .2s ease-out}}
+@keyframes pmIn{from{transform:scale(.97)}to{transform:none}}
+
+/* ---------- integrity report ---------- */
+.tl{position:relative;height:30px;border-radius:8px;background:var(--sunk)}
+.tl i{position:absolute;top:5px;width:3px;height:20px;border-radius:2px;background:var(--warn)}
+.tl i.bad{background:var(--bad)}
+.tl i.info{background:var(--line-2)}
+.ev{display:flex;gap:14px;align-items:center;padding:11px 0;border-top:1px solid var(--line);font-size:14px}
+.ev:first-child{border-top:0}
+.ev .t{font:500 12px var(--f-mono);color:var(--muted);width:48px;flex:none}
+
+/* ---------- textbook ---------- */
+.tb{display:grid;grid-template-columns:300px minmax(0,1fr);gap:20px;align-items:start}
+@media (max-width:1000px){.tb{grid-template-columns:1fr}}
+.toc{position:sticky;top:20px;padding:10px;display:flex;flex-direction:column;gap:2px}
+@media (max-width:1000px){.toc{position:static}}
+.toc a{display:flex;gap:10px;align-items:center;padding:9px 10px;border-radius:10px;color:var(--ink);text-decoration:none;font-size:14px}
+.toc a:hover{background:var(--sunk)}
+.toc a.on{background:var(--accent-soft);font-weight:500}
+.toc .rd{width:20px;height:20px;border-radius:50%;border:2px solid var(--line-2);flex:none;display:grid;place-items:center;font-size:11px;box-sizing:border-box}
+.toc .rd.done{border:0;background:var(--good-soft);color:var(--good)}
+.toc .mins{margin-left:auto;font-size:12px;color:var(--muted);white-space:nowrap}
+.reader{padding:clamp(22px,4vw,44px)}
+.reader h2.ch{font-family:var(--f-display);font-weight:400;font-size:clamp(30px,4vw,42px);line-height:1.06;letter-spacing:-.01em}
+.prose{font-size:16px;line-height:1.75;color:var(--ink-2);max-width:70ch;display:flex;flex-direction:column;gap:12px}
+.prose p{margin:0}
+.prose ul{margin:0;padding-left:20px;display:flex;flex-direction:column;gap:6px}
+.prose code{font-family:var(--f-mono);font-size:.88em;background:var(--sunk);padding:1px 6px;border-radius:5px;color:var(--ink)}
+.prose strong{color:var(--ink);font-weight:600}
+.section-h{font-size:19px;font-weight:600;letter-spacing:-.01em;margin-top:8px}
+.keybox{padding:16px 18px;border-radius:14px;background:var(--accent-soft);display:flex;flex-direction:column;gap:6px;max-width:70ch}
+.keybox .k{font-size:11.5px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--accent)}
+.keybox ul{margin:0;padding-left:18px;display:flex;flex-direction:column;gap:4px;font-size:15px}
+.figcap{font-size:12.5px;color:var(--muted);margin-top:6px}
+details.selfq{border:1px solid var(--line);border-radius:14px;padding:14px 16px;background:var(--raised)}
+details.selfq summary{cursor:pointer;font-weight:500}
+details.selfq p{margin:10px 0 0;color:var(--ink-2)}
+.gloss{display:grid;grid-template-columns:minmax(120px,200px) minmax(0,1fr);gap:8px 16px;font-size:14px;margin:0}
+.gloss dt{font-weight:600}
+.gloss dd{margin:0;color:var(--ink-2)}
+@media (max-width:560px){.gloss{grid-template-columns:1fr} .gloss dd{margin-bottom:8px}}
+.syl{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+@media (max-width:700px){.syl{grid-template-columns:1fr}}
+.syl-item{padding:14px 16px;border:1px solid var(--line);border-radius:14px;display:flex;flex-direction:column;gap:8px}
+.syl-item .trk{height:6px;border-radius:3px;background:var(--sunk);overflow:hidden}
+.syl-item .trk i{display:block;height:6px;background:var(--accent);border-radius:0 3px 3px 0}

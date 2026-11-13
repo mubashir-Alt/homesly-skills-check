@@ -1,5 +1,6 @@
 // Homesly Skills Check — browser app.
 import { CONFIG } from "./config.js";
+import { Proctor, MAX_STRIKES } from "./proctor.js";
 
 /* ============================================================ constants */
 const DEMO = !CONFIG.supabaseUrl || new URLSearchParams(location.search).has("demo");
@@ -40,7 +41,25 @@ const ICON = {
   target: I('<circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><circle cx="12" cy="12" r="1"/>'),
   play: I('<path d="M8 5v14l11-7z"/>'),
   plus: I('<path d="M12 5v14M5 12h14"/>'),
+  sun: I('<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>'),
+  moon: I('<path d="M20 14.5A8 8 0 1 1 9.5 4a6.5 6.5 0 0 0 10.5 10.5z"/>'),
+  monitor: I('<rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/>'),
+  cam: I('<rect x="3" y="6" width="13" height="12" rx="2"/><path d="m16 10 5-3v10l-5-3"/>'),
+  eye: I('<path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/>'),
+  expand: I('<path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/>'),
 };
+
+/* ============================================================ theme */
+const THEMES = [["system", "System", "monitor"], ["light", "Light", "sun"], ["dark", "Dark", "moon"]];
+function getTheme() { try { return localStorage.getItem("hsc-theme") || "system"; } catch { return "system"; } }
+function setTheme(t) {
+  try { localStorage.setItem("hsc-theme", t); } catch { /* private mode */ }
+  if (t === "system") delete document.documentElement.dataset.theme; else document.documentElement.dataset.theme = t;
+}
+function themeButton(extra = "") {
+  const t = getTheme(); const [, label, icon] = THEMES.find((x) => x[0] === t) || THEMES[0];
+  return `<button class="theme-btn ${extra}" data-act="theme" title="Change theme" aria-label="Theme: ${label}. Click to change">${ICON[icon]}${label}</button>`;
+}
 
 /* ============================================================ utils */
 const app = document.getElementById("app");
@@ -92,23 +111,28 @@ const API = DEMO ? null : {
   async session() { const { data } = await sb.auth.getSession(); return data.session; },
   async myStaff(email) { return must(await sb.from("staff").select("*").eq("email", email).maybeSingle()); },
   async loadEmployee(uid, emp) {
-    const [stats, tests, facts, sites] = await Promise.all([
+    const [stats, tests, facts, sites, books, reads] = await Promise.all([
       sb.from("learner_stats").select("*").eq("user_id", uid).maybeSingle().then(must),
       sb.from("tests").select(LIGHT_TEST).eq("user_id", uid).order("test_date", { ascending: false }).limit(120).then(must),
       sb.from("facts").select("id,site,site_name,area,fact,source").eq("emp_key", emp).then(must),
       sb.from("site_info").select("*").eq("emp_key", emp).then(must),
+      sb.from("textbooks").select("emp_key,data").eq("emp_key", emp).then(must),
+      sb.from("reading_progress").select("chapter_id,read_at").eq("user_id", uid).then(must),
     ]);
-    return { stats, tests: tests || [], facts: facts || [], sites: sites || [] };
+    return { stats, tests: tests || [], facts: facts || [], sites: sites || [], books: books || [], reads: reads || [] };
   },
   async loadManager() {
-    const [staff, tests, stats, bank] = await Promise.all([
+    const [staff, tests, stats, bank, books, reads] = await Promise.all([
       sb.from("staff").select("*").order("role").then(must),
-      sb.from("tests").select(LIGHT_TEST).order("test_date", { ascending: false }).limit(500).then(must),
+      sb.from("tests").select(LIGHT_TEST + ",integrity").order("test_date", { ascending: false }).limit(500).then(must),
       sb.from("learner_stats").select("*").then(must),
       sb.from("questions").select("id,emp_key,site,area,level,type,retired").then(must),
+      sb.from("textbooks").select("emp_key,data").then(must),
+      sb.from("reading_progress").select("user_id,email,chapter_id,read_at").then(must),
     ]);
-    return { staff: staff || [], tests: tests || [], stats: stats || [], bank: bank || [] };
+    return { staff: staff || [], tests: tests || [], stats: stats || [], bank: bank || [], books: books || [], reads: reads || [] };
   },
+  async markRead(chapterId) { must(await sb.from("reading_progress").upsert({ user_id: S.user.id, email: S.user.email, chapter_id: chapterId, read_at: new Date().toISOString() })); },
   async getTest(id) { return must(await sb.from("tests").select(FULL_TEST).eq("id", id).maybeSingle()); },
   async start(practiceAs) { return (await callApi({ action: "start", practiceAs })).test; },
   async save(t) { const { data } = await sb.rpc("save_progress", { p_test: t.id, p_answers: t.answers, p_conf: t.conf, p_flags: t.flags, p_integrity: t.integrity, p_cur: t.cur }); return data; },
@@ -123,6 +147,7 @@ async function boot() {
   if (DEMO) { const { demoApi } = await import("./demo.js"); Object.assign(window, { __API: demoApi }); }
   const api = DEMO ? window.__API : API;
   S.api = api;
+  if (DEMO) window.__hsc = S; // demo-only hook for testing; never set on the live site
   if (!DEMO) sb.auth.onAuthStateChange((evt) => { if (evt === "SIGNED_IN" || evt === "SIGNED_OUT") route(true); });
   window.addEventListener("hashchange", () => route());
   await route(true);
@@ -144,8 +169,11 @@ async function route(reload = false) {
     const [_, page, arg] = (location.hash || "").replace(/^#/, "").split("/");
     const isMgr = S.staff.role === "manager";
     if (page === "exam" && S.exam) return renderExam();
-    if (page === "exam" && !S.exam) { const t = todayTest(); if (t && t.status === "in_progress") return resumeTest(t.id); }
+    if (page === "exam" && !S.exam) { const t = todayTest(); if (t && t.status === "in_progress") return go(`#/check/${t.id}`); }
+    if (page !== "exam" && page !== "check" && S.proctor && !S.exam) { S.proctor.stop(); S.proctor = null; }
     if (page === "results" && arg) return renderTestPage(arg);
+    if (page === "check") return renderCheck(arg);
+    if (page === "textbook") return renderTextbook(arg);
     if (isMgr) {
       if (page === "person" && EMPLOYEES[arg]) return renderPerson(arg);
       if (page === "people") return renderPeople();
@@ -188,6 +216,7 @@ function renderSignIn(state = {}) {
       </div>
     </section>
     <section class="auth-form">
+      <div class="auth-theme">${themeButton()}</div>
       ${state.sent ? `
       <div class="auth-box fade-in">
         <div class="avatar lg" style="width:52px;height:52px">${ICON.mail.replace("<svg", '<svg style="width:22px;height:22px"')}</div>
@@ -229,8 +258,8 @@ function shell(active, inner) {
   const mgr = S.staff.role === "manager";
   const pending = mgr ? (S.data.tests || []).reduce((a, t) => a + (t.score?.pending || 0), 0) : 0;
   const items = mgr
-    ? [["team", "Team overview", ICON.home], ["people", "People & access", ICON.key], ["bank", "Question bank", ICON.layers]]
-    : [["overview", "Overview", ICON.home], ["results", "My results", ICON.chart], ["study", "Study notes", ICON.book]];
+    ? [["team", "Team overview", ICON.home], ["people", "People & access", ICON.key], ["bank", "Question bank", ICON.layers], ["textbook", "Textbooks", ICON.book]]
+    : [["overview", "Overview", ICON.home], ["textbook", "Textbook", ICON.book], ["results", "My results", ICON.chart], ["study", "Quick notes", ICON.clip]];
   const persons = mgr ? Object.values(EMPLOYEES).map((e) => `<a href="#/person/${e.key}" class="${active === "person-" + e.key ? "on" : ""}"><span class="avatar" style="width:22px;height:22px;font-size:10px;background:var(--side-2);color:#9FE3CB">${initials(e.name)}</span>${h(e.name)}</a>`).join("") : "";
   return `<div class="shell ${S.menu ? "menu-open" : ""}">
     <div class="mob-top"><button data-act="menu" aria-label="Open menu">${ICON.menu.replace("<svg", '<svg style="width:22px;height:22px"')}</button><div class="brand-mark" style="width:28px;height:28px;font-size:17px">H</div><b style="font-size:14px">Skills Check</b></div>
@@ -242,6 +271,7 @@ function shell(active, inner) {
         ${items.map(([k, l, ic]) => `<a href="#/${k}" class="${active === k ? "on" : ""}">${ic}${l}${k === "team" && pending ? `<span class="badge">${pending}</span>` : ""}</a>`).join("")}
         ${mgr ? `<div class="lbl">People</div>${persons}` : ""}
       </nav>
+      <div style="margin-top:auto">${themeButton()}</div>
       <div class="side-foot"><div class="avatar">${initials(S.staff.full_name)}</div><div class="who"><b>${h(S.staff.full_name)}</b><span>${h(S.user.email)}</span></div><button data-act="signout" title="Sign out" aria-label="Sign out">${ICON.out.replace("<svg", '<svg style="width:18px;height:18px"')}</button></div>
     </aside>
     <main class="main"><div class="main-inner fade-in">${inner}</div></main>
@@ -337,7 +367,7 @@ function renderOverview() {
       <h2>Ready when you are, ${h(firstName(emp.name))}.</h2>
       <p>Fifteen questions about the work on your sites, including a few written fresh for you today. Take it in one sitting; the timer starts when you begin.</p>
       <div class="hero-meta"><div><b>${TEST_SIZE}</b><span>questions</span></div><div><b>${MINUTES} min</b><span>time limit</span></div><div><b>~4</b><span>new today</span></div><div><b>${emp.sites.length}</b><span>sites covered</span></div></div>
-      <div class="row"><button class="btn primary lg" data-act="start">${ICON.play} Start assessment</button><a class="btn ghost" href="#/study">Review study notes</a></div>`;
+      <div class="row"><button class="btn primary lg" data-act="start">${ICON.play} Start assessment</button><a class="btn ghost" href="#/textbook">Open my textbook</a></div>`;
   }
   const recent = (S.data.tests || []).filter((x) => x.status === "done" && x.kind === "daily").slice(0, 5);
   paint("overview", `
@@ -345,6 +375,10 @@ function renderOverview() {
       <div class="row" style="gap:6px">${emp.sites.slice(0, 3).map((s) => `<span class="chip site">${h(s)}</span>`).join("")}${emp.sites.length > 3 ? `<span class="chip">+${emp.sites.length - 3}</span>` : ""}</div></div>
     <div class="stack" style="gap:20px">
       <section class="hero stack">${hero}</section>
+      ${(() => { const book = bookFor(S.staff.emp_key); if (!book) return ""; const reads = readSet(S.staff.emp_key); const sug = suggestedChapter(book, reads, st.area_stats); const done = book.chapters.filter((c) => reads.has(c.id)).length;
+        return `<section class="card row" style="gap:18px"><span class="avatar lg" style="border-radius:12px">${ICON.book.replace("<svg", '<svg style="width:20px;height:20px"')}</span>
+          <div class="grow" style="min-width:220px"><span class="eyebrow">Textbook · ${done} of ${book.chapters.length} chapters read</span><div style="font-weight:500;margin-top:2px">${sug ? `Suggested next: ${h(sug.title)}` : "You've read every chapter. Revisit the ones covering your weaker areas."}</div><div class="xs muted">${sug ? `Covers ${(sug.areas || []).map((a) => AREAS[a] || a).join(", ")} · ${sug.minutes || "–"} min` : ""}</div></div>
+          <a class="btn" href="#/textbook${sug ? "/" + h(sug.id) : ""}">${sug ? "Read now" : "Open textbook"}</a></section>`; })()}
       <div class="grid g-4">
         ${kpi("7-day average", m.avg7 == null ? "–" : `${m.avg7}<small>%</small>`, m.delta == null ? "Builds after a week of tests" : `${m.delta >= 0 ? "▲" : "▼"} ${Math.abs(m.delta)} pts vs previous week`)}
         ${kpi("Day streak", `${m.streak}<small> ${m.streak === 1 ? "day" : "days"}</small>`, m.streak ? "Keep it going tomorrow" : "Take today's test to start one")}
@@ -408,7 +442,136 @@ function renderStudy() {
   input?.addEventListener("input", () => { S.cache.studyQ = input.value; clearTimeout(S.cache.studyT); S.cache.studyT = setTimeout(() => { renderStudy(); const i = document.getElementById("study-q"); i.focus(); i.setSelectionRange(i.value.length, i.value.length); }, 250); });
 }
 
+/* ============================================================ textbook */
+function md(text) {
+  const inline = (s) => h(s).replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>").replace(/`([^`]+)`/g, "<code>$1</code>");
+  return String(text || "").split(/\n{2,}/).map((block) => {
+    const lines = block.split("\n").filter((l) => l.trim());
+    if (lines.length && lines.every((l) => /^\s*-\s+/.test(l))) return `<ul>${lines.map((l) => `<li>${inline(l.replace(/^\s*-\s+/, ""))}</li>`).join("")}</ul>`;
+    return `<p>${lines.map(inline).join("<br>")}</p>`;
+  }).join("");
+}
+function bookFor(emp) { return (S.data.books || []).find((b) => b.emp_key === emp)?.data || null; }
+function readSet(emp) {
+  if (S.staff.role !== "manager") return new Set((S.data.reads || []).map((r) => r.chapter_id));
+  const email = S.data.staff.find((s) => s.role === "employee" && s.emp_key === emp)?.email;
+  return new Set((S.data.reads || []).filter((r) => r.email === email).map((r) => r.chapter_id));
+}
+function suggestedChapter(book, reads, areaStats) {
+  if (!book) return null;
+  const acc = (a) => { const v = areaStats?.[a]; return v && v.m ? v.e / v.m : 0.5; };
+  const unread = book.chapters.filter((c) => !reads.has(c.id));
+  if (!unread.length) return null;
+  return unread.slice().sort((a, b) => Math.min(...(a.areas || []).map(acc), 1) - Math.min(...(b.areas || []).map(acc), 1))[0];
+}
+function renderTextbook(chId) {
+  const mgr = S.staff.role === "manager";
+  const emp = mgr ? (S.cache.tbEmp || "harshith") : S.staff.emp_key;
+  const book = bookFor(emp); const reads = readSet(emp);
+  const empTabs = mgr ? `<div class="tabs">${Object.values(EMPLOYEES).map((e) => `<button class="${e.key === emp ? "on" : ""}" data-act="tb-emp" data-emp="${e.key}">${h(e.name)}</button>`).join("")}</div>` : "";
+  if (!book) return paint("textbook", `<div class="page-h"><div><h1>${mgr ? "Textbooks" : "Textbook"}</h1><p class="sub">The pre-exam study guide.</p></div>${empTabs}</div><div class="empty">The textbook hasn't been loaded yet.</div>`);
+  const chapters = book.chapters; const done = chapters.filter((c) => reads.has(c.id)).length; const pctRead = Math.round((100 * done) / chapters.length);
+  const totalMin = chapters.reduce((a, c) => a + (c.minutes || 0), 0);
+  const ch = chapters.find((c) => c.id === chId);
+  const toc = `<nav class="card toc" aria-label="Chapters"><span class="eyebrow" style="padding:8px 10px">Chapters</span>${chapters.map((c, i) => `<a href="#/textbook/${h(c.id)}" class="${ch && c.id === ch.id ? "on" : ""}"><span class="rd ${reads.has(c.id) ? "done" : ""}">${reads.has(c.id) ? "✓" : ""}</span><span>${i + 1}. ${h(c.title)}</span><span class="mins">${c.minutes || "–"} min</span></a>`).join("")}</nav>`;
+  const head = `<div class="page-h"><div><span class="eyebrow">Pre-exam textbook${mgr ? " · " + h(EMPLOYEES[emp].name) : ""}</span><h1 style="margin-top:4px">${h(book.title)}</h1></div>
+    <div class="row">${empTabs}<span class="small muted">${done} of ${chapters.length} chapters read</span><div class="bar" style="grid-template-columns:140px;width:140px"><span class="trk"><span class="fill" style="width:${pctRead}%"></span></span></div></div></div>`;
+  if (!ch) {
+    const next = suggestedChapter(book, reads, mgr ? null : S.data.stats?.area_stats);
+    return paint("textbook", `${head}
+      <div class="stack" style="gap:20px">
+        <section class="card stack"><div class="prose">${md(book.intro)}</div>
+          <div class="row">${next ? `<a class="btn primary" href="#/textbook/${h(next.id)}">${ICON.book}${done ? "Continue with" : "Start with"} "${h(next.title)}"</a>` : `<span class="chip good">All chapters read</span>`}<span class="small muted">${chapters.length} chapters · about ${totalMin} minutes in total</span></div></section>
+        <section class="card"><div class="card-h"><h3>Syllabus: what the test covers</h3><span class="xs muted">Share of questions per area</span></div>
+          <div class="syl">${(book.syllabus || []).slice().sort((a, b) => b.weight - a.weight).map((s) => `<div class="syl-item"><div class="row between"><b style="font-weight:600">${h(AREAS[s.area] || s.area)}</b><span class="mono small">${s.weight}%</span></div><span class="trk"><i style="width:${Math.min(100, s.weight * 3)}%"></i></span><span class="small ink2">${(s.topics || []).map(h).join(" · ")}</span></div>`).join("")}</div></section>
+        <section class="card"><div class="card-h"><h3>Chapters</h3></div><div class="list">${chapters.map((c, i) => `<a class="li click" href="#/textbook/${h(c.id)}" style="text-decoration:none;color:inherit"><span class="avatar" style="${reads.has(c.id) ? "background:var(--good-soft);color:var(--good)" : ""}">${reads.has(c.id) ? "✓" : i + 1}</span><div class="grow"><b style="font-weight:500">${h(c.title)}</b><div class="xs muted">${h(c.summary || "")}</div></div><span class="chip site">${h(siteLabel(c.site))}</span><span class="xs muted" style="white-space:nowrap">${c.minutes || "–"} min</span></a>`).join("")}</div></section>
+      </div>`);
+  }
+  const idx = chapters.indexOf(ch); const prev = chapters[idx - 1]; const next = chapters[idx + 1];
+  paint("textbook", `${head}
+    <div class="tb">${toc}
+      <article class="card reader stack" style="gap:20px">
+        <div class="row" style="gap:6px"><span class="chip site">${h(siteLabel(ch.site))}</span>${(ch.areas || []).map((a) => `<span class="chip">${h(AREAS[a] || a)}</span>`).join("")}<span class="xs muted">${ch.minutes || "–"} min read</span></div>
+        <h2 class="ch">Chapter ${idx + 1}. ${h(ch.title)}</h2>
+        ${ch.summary ? `<p class="ink2" style="font-size:17px;max-width:68ch">${h(ch.summary)}</p>` : ""}
+        ${(ch.sections || []).map((s) => `<section class="stack" style="gap:12px">
+          <h3 class="section-h">${h(s.heading)}</h3>
+          <div class="prose">${md(s.body)}</div>
+          ${s.code?.snippet ? `<figure style="margin:0">${codeBlock(s.code.snippet)}${s.code.caption ? `<figcaption class="figcap">${h(s.code.caption)}</figcaption>` : ""}</figure>` : ""}
+          ${s.keyPoints?.length ? `<div class="keybox"><span class="k">Key points</span><ul>${s.keyPoints.map((k) => `<li>${h(k)}</li>`).join("")}</ul></div>` : ""}
+        </section>`).join("")}
+        ${ch.checklist?.length ? `<section class="stack-s"><h3 class="section-h">On-the-job checklist</h3><ul class="prose" style="padding-left:20px">${ch.checklist.map((c) => `<li>${h(c)}</li>`).join("")}</ul></section>` : ""}
+        ${ch.glossary?.length ? `<section class="stack-s"><h3 class="section-h">Glossary</h3><dl class="gloss">${ch.glossary.map((g) => `<dt>${h(g.term)}</dt><dd>${h(g.definition)}</dd>`).join("")}</dl></section>` : ""}
+        ${ch.selfCheck?.length ? `<section class="stack-s"><h3 class="section-h">Check yourself</h3>${ch.selfCheck.map((q) => `<details class="selfq"><summary>${h(q.q)}</summary><p>${h(q.a)}</p></details>`).join("")}</section>` : ""}
+        <div class="row between" style="border-top:1px solid var(--line);padding-top:18px">
+          ${prev ? `<a class="btn" href="#/textbook/${h(prev.id)}">${ICON.left}Previous</a>` : `<a class="btn" href="#/textbook">${ICON.left}Contents</a>`}
+          ${mgr ? (next ? `<a class="btn primary" href="#/textbook/${h(next.id)}">Next chapter${ICON.right}</a>` : "") : `<button class="btn primary" data-act="mark-read" data-ch="${h(ch.id)}" data-next="${h(next?.id || "")}">${reads.has(ch.id) ? (next ? "Next chapter" : "Back to contents") : next ? "Mark as read and continue" : "Mark as read"}${ICON.right}</button>`}
+        </div>
+      </article>
+    </div>`);
+}
+
+/* ============================================================ pre-exam check */
+// arg: undefined (today's test), a test id (resume), or "practice-<emp>" (manager practice)
+function renderCheck(arg) {
+  const practiceAs = arg?.startsWith("practice-") ? arg.slice(9) : null;
+  const resumeId = arg && !practiceAs ? arg : null;
+  if (S.proctor && !S.exam) { S.proctor.stop(); S.proctor = null; }
+  const pr = new Proctor({ startedAt: new Date().toISOString() });
+  S.proctor = pr;
+  const back = S.staff.role === "manager" ? "#/bank" : "#/overview";
+  app.innerHTML = `<div class="exam">
+    <header class="exam-top"><div class="exam-top-in">
+      <div class="brand-mark" style="width:32px;height:32px;font-size:19px">H</div>
+      <div class="exam-title grow"><b>${practiceAs ? `Practice · ${h(EMPLOYEES[practiceAs].name)}` : resumeId ? "Resume your assessment" : "Daily assessment"}</b><span>${h(fmtDay(localDate(), { weekday: "long", day: "numeric", month: "long" }))}</span></div>
+      ${themeButton()}<a class="btn ghost" href="${back}" data-act="leave-check">Not now</a>
+    </div></header>
+    <main class="main-inner fade-in" style="width:100%;padding:36px max(20px,env(safe-area-inset-right,0px)) 60px max(20px,env(safe-area-inset-left,0px))">
+      <div class="check">
+        <section class="stack" style="gap:22px">
+          <span class="eyebrow">Before you start</span>
+          <h1 class="serif" style="font-size:clamp(32px,4.4vw,46px);line-height:1.05">A quick check, then ${MINUTES} minutes that count.</h1>
+          <p class="ink2" style="max-width:60ch">Your camera stays on during the test so we know the answers are yours. Nothing is recorded or uploaded. Only warnings are logged, such as leaving the page or looking away.</p>
+          <div class="stack-s">
+            <div class="check-item" id="ck-cam"><span class="st">${ICON.cam}</span><div class="grow"><b style="font-weight:500">Camera</b><div class="small muted" id="ck-cam-t">Waiting for permission…</div></div><button class="btn sm" data-act="cam-retry" id="ck-cam-btn" hidden>Try again</button></div>
+            <div class="check-item" id="ck-face"><span class="st">${ICON.eye}</span><div class="grow"><b style="font-weight:500">Face in view, looking at the screen</b><div class="small muted" id="ck-face-t">Starting face check…</div></div></div>
+            <div class="check-item ${document.fullscreenEnabled ? "wait" : "ok"}"><span class="st">${ICON.expand}</span><div class="grow"><b style="font-weight:500">Full screen</b><div class="small muted">${document.fullscreenEnabled ? "Starting the test switches to full screen. Leaving it is logged." : "Not available on this device, so it's skipped."}</div></div></div>
+          </div>
+          <div class="card flat stack-s" style="padding:18px">
+            <b style="font-weight:600">The rules</b>
+            <div class="rules"><span>· Stay on this page and in full screen</span><span>· No phone, notes or second screen</span><span>· Copy and paste are switched off</span><span>· 90 seconds idle triggers a check-in</span><span>· Each warning counts as a strike</span><span>· ${MAX_STRIKES} strikes submits the test automatically</span></div>
+          </div>
+          <div class="row"><button class="btn primary lg" data-act="begin" data-practice="${h(practiceAs || "")}" data-resume="${h(resumeId || "")}" id="ck-go" disabled>${resumeId ? "Resume the assessment" : "I agree. Start the assessment"}</button><span class="small muted">${TEST_SIZE} questions · ${MINUTES} minutes · one attempt</span></div>
+        </section>
+        <aside class="stack-s">
+          <div class="cam-big" id="ck-video"><div class="empty-cam" id="ck-empty">Allow camera access when your browser asks.</div><div class="tag"><i></i><span id="ck-tag">Starting camera…</span></div><div class="note">Not recorded</div></div>
+          <p class="xs muted">The image stays in this browser. The page only checks that one face is in view and facing the screen.</p>
+        </aside>
+      </div>
+    </main>
+  </div>`;
+  pr.onStatus((s) => {
+    const set = (id, cls, text) => { const el = document.getElementById(id); if (!el) return; el.className = "check-item " + cls; document.getElementById(id + "-t").textContent = text; };
+    const camText = { ok: "Camera is on", denied: "Camera access was blocked. Allow it in your browser's address bar, then try again.", error: "No camera found, or it's in use by another app.", unsupported: "This browser can't use the camera. Use Chrome, Edge or Safari.", stopped: "The camera turned off.", off: "Waiting for permission…" }[s.camera];
+    set("ck-cam", s.camera === "ok" ? "ok" : s.camera === "off" ? "wait" : "bad", camText);
+    const fOk = s.face === "ok" || s.face === "unavailable";
+    set("ck-face", s.camera !== "ok" ? "" : fOk ? "ok" : s.face === "loading" ? "wait" : "bad", s.camera !== "ok" ? "Needs the camera" : s.face === "unavailable" ? "Face check couldn't load; the camera still runs" : s.label);
+    const btn = document.getElementById("ck-cam-btn"); if (btn) btn.hidden = s.camera === "ok" || s.camera === "off";
+    const vid = document.getElementById("ck-video");
+    if (vid) { vid.className = "cam-big " + (s.camera === "ok" && fOk ? "ok" : s.camera === "ok" && s.face !== "loading" ? "bad" : ""); document.getElementById("ck-tag").textContent = s.camera === "ok" ? s.label : "Camera off"; document.getElementById("ck-empty").hidden = s.camera === "ok"; }
+    const go = document.getElementById("ck-go"); if (go) go.disabled = !pr.ready();
+  });
+  document.getElementById("ck-video").prepend(pr.video);
+  pr.startCamera();
+}
+
 /* ============================================================ exam */
+async function beginFromCheck(practiceAs, resumeId) {
+  const pr = S.proctor; if (!pr || !pr.ready()) return;
+  await Proctor.enterFullscreen();
+  if (resumeId) return resumeTest(resumeId);
+  return startTest(practiceAs || undefined);
+}
 async function startTest(practiceAs) {
   app.innerHTML = `<div class="center"><div class="card stack fade-in" style="max-width:460px;text-align:center;align-items:center">
     <div class="spinner" style="width:28px;height:28px"></div><h3>Preparing your questions</h3>
@@ -428,6 +591,15 @@ async function resumeTest(id) {
 function openExam(t) {
   S.exam = { ...t, answers: t.answers || {}, conf: t.conf || {}, flags: t.flags || {}, integrity: t.integrity || { tabAways: 0, pastes: 0 }, cur: t.cur || 0, practice: t.kind === "practice" };
   if (new Date(t.deadline_at).getTime() <= Date.now()) return submitExam(true);
+  const pr = S.proctor;
+  if (!pr || pr.camera !== "ok") { S.exam = null; return go(`#/check/${t.kind === "practice" ? "practice-" + t.emp_key : t.id}`); }
+  const prev = S.exam.integrity || {};
+  pr.startedAt = t.started_at;
+  pr.log = { strikes: prev.strikes || 0, tabAways: prev.tabAways || 0, pastes: prev.pastes || 0, events: (prev.events || []).slice(-150) };
+  pr.onLog = (log) => { if (!S.exam) return; S.exam.integrity = { ...log, events: log.events.slice() }; queueSave(); };
+  pr.onAutoSubmit = () => submitExam(true);
+  if (prev.events?.length) pr.record("resume", "Came back to the assessment");
+  pr.begin();
   if (location.hash !== "#/exam") location.hash = "#/exam"; else renderExam();
   startTimer();
 }
@@ -452,6 +624,7 @@ function renderExam() {
       <div class="exam-top-in">
         <div class="brand-mark" style="width:32px;height:32px;font-size:19px">H</div>
         <div class="exam-title grow"><b>${t.practice ? `Practice · ${h(EMPLOYEES[t.emp_key].name)}` : "Daily assessment"}</b><span>${h(fmtDay(t.test_date, { weekday: "long", day: "numeric", month: "long" }))} · ${done} of ${n} answered</span></div>
+        ${themeButton()}
         <div class="timer ${left < 120000 ? "low" : ""}" id="timer" role="timer" aria-label="Time left">${ICON.clock}<span>${fmtClock(left)}</span></div>
         <button class="btn dark" data-act="finish">Finish</button>
       </div>
@@ -491,7 +664,7 @@ function renderExam() {
     </div></footer>
   </div>`;
   const ta = document.getElementById("short-answer");
-  if (ta) { ta.addEventListener("input", () => { S.exam.answers[q.id] = ta.value; queueSave(); }); ta.addEventListener("paste", () => { S.exam.integrity.pastes = (S.exam.integrity.pastes || 0) + 1; queueSave(); }); }
+  if (ta) ta.addEventListener("input", () => { S.exam.answers[q.id] = ta.value; queueSave(); });
 }
 function codeBlock(code) { return `<pre class="code" tabindex="0">${String(code).split("\n").map((l, i) => `<span class="ln">${i + 1}</span>${h(l)}`).join("\n")}</pre>`; }
 function answerUI(q, a) {
@@ -532,6 +705,7 @@ function closeModal() { document.getElementById("modal")?.remove(); }
 let submitting = false;
 async function submitExam(auto = false) {
   if (submitting || !S.exam) return; submitting = true; closeModal(); clearInterval(timerId); clearTimeout(saveT);
+  if (S.proctor) { S.exam.integrity = { ...S.proctor.log, events: S.proctor.log.events.slice() }; S.proctor.stop(); S.proctor = null; }
   app.innerHTML = `<div class="center"><div class="card stack fade-in" style="max-width:420px;text-align:center;align-items:center"><div class="spinner" style="width:28px;height:28px"></div><h3>${auto ? "Time's up. Marking your answers" : "Marking your answers"}</h3><p class="ink2">Written answers are being checked against the model answer.</p></div></div>`;
   try {
     await saving;
@@ -541,7 +715,6 @@ async function submitExam(auto = false) {
   } catch (e) { toast(e.message); renderExam(); startTimer(); }
   finally { submitting = false; }
 }
-document.addEventListener("visibilitychange", () => { if (document.hidden && S.exam && location.hash === "#/exam") { S.exam.integrity.tabAways = (S.exam.integrity.tabAways || 0) + 1; queueSave(); } });
 document.addEventListener("keydown", (e) => {
   if (!S.exam || location.hash !== "#/exam" || document.getElementById("modal")) return;
   if (e.target.closest("textarea,input")) return;
@@ -579,11 +752,12 @@ async function renderTestPage(id) {
           <h2 style="font-size:24px">${sc.e} of ${sc.m} points</h2>
           <div class="grid g-3" style="gap:12px;max-width:520px">
             <div class="kpi"><span class="eyebrow">Time taken</span><span class="mono">${fmtClock(new Date(t.submitted_at) - new Date(t.started_at))}${t.auto_submitted ? " · time ran out" : ""}</span></div>
-            <div class="kpi"><span class="eyebrow">Tab switches</span><span class="mono">${t.integrity?.tabAways || 0}</span></div>
-            <div class="kpi"><span class="eyebrow">Pastes</span><span class="mono">${t.integrity?.pastes || 0}</span></div>
+            <div class="kpi"><span class="eyebrow">Strikes</span><span class="mono">${t.integrity?.strikes || 0} / ${MAX_STRIKES}</span></div>
+            <div class="kpi"><span class="eyebrow">Left the page</span><span class="mono">${t.integrity?.tabAways || 0}×</span></div>
           </div>
         </div>
       </section>
+      ${integrityCard(t)}
       <div class="grid g-main">
         <section class="card"><div class="card-h"><h3>By area</h3></div>${skillBars(sc.byArea, { empty: "Nothing marked yet." })}</section>
         <section class="card"><div class="card-h"><h3>Focus next</h3></div>
@@ -596,6 +770,20 @@ async function renderTestPage(id) {
         ${shown.length ? shown.map((r) => reviewItem(t, r, mgr && !own)).join("") : `<div class="empty">Nothing in this view.</div>`}
       </section>
     </div>`);
+}
+const EV_KIND = { "face-none": "bad", "face-multi": "bad", "face-side": "bad", "face-down": "bad", "left-page": "warn", "fullscreen-exit": "warn", "idle-unanswered": "warn", "camera-stopped": "bad", "paste-blocked": "warn", "copy-blocked": "info", idle: "info", start: "info", resume: "info" };
+function integrityCard(t) {
+  const ig = t.integrity || {}; const evs = (ig.events || []).filter((e) => e.type !== "start");
+  const total = Math.max(1, Math.round((new Date(t.submitted_at || t.deadline_at) - new Date(t.started_at)) / 1000));
+  const strikes = ig.strikes || 0;
+  const status = !ig.events ? ["Not monitored (older test)", ""] : strikes === 0 ? ["Clean: no strikes", "good"] : strikes >= MAX_STRIKES ? ["Submitted automatically after " + MAX_STRIKES + " strikes", "bad"] : [`${strikes} strike${strikes > 1 ? "s" : ""}`, "warn"];
+  return `<section class="card stack">
+    <div class="card-h" style="margin:0"><h3>Integrity</h3><span class="chip ${status[1]}">${status[0]}</span></div>
+    ${evs.length ? `<div class="tl" role="img" aria-label="Events across the test">${evs.map((e) => `<i class="${EV_KIND[e.type] || "info"}" style="left:${Math.min(99, (100 * e.t) / total)}%" data-tip="${fmtClock(e.t * 1000)} · ${h(e.detail)}"></i>`).join("")}</div>
+      <div class="row between xs muted mono"><span>0:00</span><span>${fmtClock(total * 1000)}</span></div>
+      <div>${evs.map((e) => `<div class="ev"><span class="t">${fmtClock(e.t * 1000)}</span>${e.strike ? `<span class="chip ${EV_KIND[e.type] === "bad" ? "bad" : "warn"}">Strike ${e.strike}</span>` : `<span class="chip">Logged</span>`}<span class="grow">${h(e.detail)}</span></div>`).join("")}</div>`
+      : `<p class="small muted">${ig.events ? "No warnings during this test. The camera, tab and idle checks ran the whole time." : "This test was taken before monitoring was added."}</p>`}
+  </section>`;
 }
 function reviewItem(t, { q, i, g, a }, canMark) {
   const verdict = !g || g.f == null ? `<span class="chip warn">Awaiting marking</span>` : g.f >= 1 ? `<span class="chip good">${ICON.check.replace("<svg", '<svg style="width:12px;height:12px"')} Correct</span>` : g.f > 0 ? `<span class="chip warn">Partly right · ${Math.round(g.f * 100)}%</span>` : `<span class="chip bad">Incorrect</span>`;
@@ -687,7 +875,7 @@ function renderPerson(k) {
         ${tests.map((t) => `<tr class="click" data-href="#/results/${t.id}"><td>${h(fmtDay(t.test_date, { weekday: "short", day: "numeric", month: "short" }))}</td>
           <td>${t.status === "done" ? `<b>${t.score.pct}%</b> <span class="xs muted">${t.score.e}/${t.score.m}</span>` : "–"}</td>
           <td class="mono xs">${t.submitted_at ? fmtClock(new Date(t.submitted_at) - new Date(t.started_at)) : "–"}</td>
-          <td class="xs">${t.score?.confWrong?.length ? `<span class="chip bad">${t.score.confWrong.length} certain-but-wrong</span>` : "<span class='muted'>–</span>"}</td>
+          <td class="xs">${t.integrity?.strikes ? `<span class="chip ${t.integrity.strikes >= MAX_STRIKES ? "bad" : "warn"}">${t.integrity.strikes} strike${t.integrity.strikes > 1 ? "s" : ""}</span>` : t.integrity?.events ? `<span class="chip good">Clean</span>` : "<span class='muted'>–</span>"}</td>
           <td>${t.status !== "done" ? `<span class="chip warn">In progress</span>` : t.score.pending ? `<span class="chip warn">${t.score.pending} to mark</span>` : `<span class="chip ${band(t.score.pct)[1]}">${band(t.score.pct)[0]}</span>`}</td></tr>`).join("")}
         </tbody></table></div>` : `<div class="empty">No assessments yet.</div>`}</section>
     </div>`);
@@ -761,9 +949,22 @@ document.addEventListener("click", async (e) => {
     case "reload": return location.reload();
     case "signout": await S.api.signOut(); S.exam = null; location.hash = ""; return route(true);
     case "menu": S.menu = !S.menu; return route();
-    case "start": return startTest();
-    case "resume": return resumeTest(d.id);
-    case "practice": return startTest(d.emp);
+    case "start": return go("#/check");
+    case "resume": return go(`#/check/${d.id}`);
+    case "practice": return go(`#/check/practice-${d.emp}`);
+    case "begin": return beginFromCheck(d.practice, d.resume);
+    case "cam-retry": return S.proctor?.startCamera();
+    case "theme": {
+      const order = THEMES.map((x) => x[0]); const next = order[(order.indexOf(getTheme()) + 1) % order.length];
+      setTheme(next);
+      document.querySelectorAll('[data-act="theme"]').forEach((b) => { b.outerHTML = themeButton(); });
+      return;
+    }
+    case "mark-read": {
+      try { await S.api.markRead(d.ch); if (!S.data.reads.some((r) => r.chapter_id === d.ch)) S.data.reads.push({ chapter_id: d.ch, read_at: new Date().toISOString() }); } catch (x) { toast(x.message); return; }
+      return d.next ? go(`#/textbook/${d.next}`) : go("#/textbook");
+    }
+    case "tb-emp": S.cache.tbEmp = d.emp; return renderTextbook();
     case "finish": return finishModal();
     case "submit": return submitExam(false);
     case "close-modal": return closeModal();

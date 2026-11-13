@@ -108,7 +108,7 @@ textarea.input{height:auto;min-height:150px;padding:12px 14px;line-height:1.55;r
 .nav a.on{background:var(--side-2);color:#fff;box-shadow:inset 2px 0 0 #3CC29A}
 .nav a.on svg{opacity:1}
 .nav .badge{margin-left:auto;font-size:11px;padding:1px 7px;border-radius:999px;background:#3CC29A;color:#04201A;font-weight:600}
-.side-foot{margin-top:auto;border-top:1px solid var(--side-line);padding-top:14px;display:flex;align-items:center;gap:10px}
+.side-foot{border-top:1px solid var(--side-line);padding-top:14px;display:flex;align-items:center;gap:10px}
 .side-foot .who{min-width:0;flex:1} .side-foot .who b{display:block;font-size:13px;color:#fff;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .side-foot .who span{display:block;font-size:11.5px;color:var(--side-muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .side-foot .avatar{background:var(--side-2);color:#9FE3CB}

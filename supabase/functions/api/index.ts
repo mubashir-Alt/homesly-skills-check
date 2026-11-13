@@ -161,7 +161,13 @@ async function importBank(req: Request, body: { emp: string; questions?: Questio
   for (let i = 0; i < qs.length; i += 200) { const { error } = await admin.from("questions").upsert(qs.slice(i, i + 200)); if (error) return fail(error.message, 500); }
   for (let i = 0; i < facts.length; i += 200) { const { error } = await admin.from("facts").upsert(facts.slice(i, i + 200)); if (error) return fail(error.message, 500); }
   if (sites.length) { const { error } = await admin.from("site_info").upsert(sites); if (error) return fail(error.message, 500); }
-  return json({ ok: true, questions: qs.length, facts: facts.length, sites: sites.length });
+  const book = (body as { textbook?: { chapters?: unknown[] } }).textbook;
+  if (book) {
+    if (!Array.isArray(book.chapters) || !book.chapters.length) return fail("Textbook has no chapters.");
+    const { error } = await admin.from("textbooks").upsert({ emp_key: body.emp, data: book, updated_at: new Date().toISOString() });
+    if (error) return fail(error.message, 500);
+  }
+  return json({ ok: true, questions: qs.length, facts: facts.length, sites: sites.length, textbookChapters: book?.chapters?.length || 0 });
 }
 
 Deno.serve(async (req) => {

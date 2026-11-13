@@ -3,3 +3,12 @@ project_id = "homesly-skills-check"
 [functions.api]
 # The function checks the signed-in user itself (and the import token for bank imports).
 verify_jwt = false
+
+[auth]
+site_url = "https://mubashir-alt.github.io/homesly-skills-check/"
+additional_redirect_urls = ["https://mubashir-alt.github.io/homesly-skills-check/", "http://localhost:5178/"]
+enable_signup = true
+
+[auth.email]
+enable_signup = true
+otp_expiry = 3600

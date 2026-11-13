@@ -153,7 +153,8 @@ async function boot() {
   await route(true);
 }
 
-async function route(reload = false) {
+const isNetErr = (e) => e instanceof TypeError && /fetch|network|load failed/i.test(e.message || "");
+async function route(reload = false, attempt = 0) {
   const api = S.api;
   try {
     if (reload) {
@@ -185,7 +186,9 @@ async function route(reload = false) {
     return renderOverview();
   } catch (e) {
     console.error(e);
-    app.innerHTML = `<div class="center"><div class="card stack" style="max-width:440px"><h3>Something went wrong</h3><p class="ink2">${h(e.message)}</p><div><button class="btn" data-act="reload">Reload</button></div></div></div>`;
+    if (isNetErr(e) && attempt < 2) { await new Promise((r) => setTimeout(r, 1200 * (attempt + 1))); return route(reload, attempt + 1); }
+    const msg = isNetErr(e) ? "Couldn't reach the server. Check your internet connection. If it keeps happening, an ad blocker or privacy extension may be blocking supabase.co: allow it for this site, or try an Incognito window." : e.message;
+    app.innerHTML = `<div class="center"><div class="card stack" style="max-width:440px"><h3>${isNetErr(e) ? "Connection problem" : "Something went wrong"}</h3><p class="ink2">${h(msg)}</p><div><button class="btn" data-act="reload">Reload</button></div></div></div>`;
   }
 }
 async function loadData() {
@@ -258,8 +261,8 @@ function shell(active, inner) {
   const mgr = S.staff.role === "manager";
   const pending = mgr ? (S.data.tests || []).reduce((a, t) => a + (t.score?.pending || 0), 0) : 0;
   const items = mgr
-    ? [["team", "Team overview", ICON.home], ["people", "People & access", ICON.key], ["bank", "Question bank", ICON.layers], ["textbook", "Textbooks", ICON.book]]
-    : [["overview", "Overview", ICON.home], ["textbook", "Textbook", ICON.book], ["results", "My results", ICON.chart], ["study", "Quick notes", ICON.clip]];
+    ? [["team", "Team overview", ICON.home], ["people", "People & access", ICON.key], ["bank", "Question bank", ICON.layers], ["textbook", "Textbooks & syllabus", ICON.book]]
+    : [["overview", "Overview", ICON.home], ["textbook", "Textbook & syllabus", ICON.book], ["results", "My results", ICON.chart], ["study", "Quick notes", ICON.clip]];
   const persons = mgr ? Object.values(EMPLOYEES).map((e) => `<a href="#/person/${e.key}" class="${active === "person-" + e.key ? "on" : ""}"><span class="avatar" style="width:22px;height:22px;font-size:10px;background:var(--side-2);color:#9FE3CB">${initials(e.name)}</span>${h(e.name)}</a>`).join("") : "";
   return `<div class="shell ${S.menu ? "menu-open" : ""}">
     <div class="mob-top"><button data-act="menu" aria-label="Open menu">${ICON.menu.replace("<svg", '<svg style="width:22px;height:22px"')}</button><div class="brand-mark" style="width:28px;height:28px;font-size:17px">H</div><b style="font-size:14px">Skills Check</b></div>

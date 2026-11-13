@@ -1,0 +1,5 @@
+project_id = "homesly-skills-check"
+
+[functions.api]
+# The function checks the signed-in user itself (and the import token for bank imports).
+verify_jwt = false

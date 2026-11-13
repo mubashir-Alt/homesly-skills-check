@@ -1,0 +1,9 @@
+# Answer keys and secrets never go to GitHub (the repo is public for GitHub Pages)
+private-bank/
+.env
+.env.*
+supabase/.temp/
+supabase/.branches/
+node_modules/
+.claude/
+.DS_Store

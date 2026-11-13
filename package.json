@@ -1,0 +1,9 @@
+{
+  "name": "homesly-skills-check",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "preview": "npx --yes http-server@14.1.1 -p 5178 -c-1",
+    "import-bank": "node scripts/import-bank.mjs"
+  }
+}

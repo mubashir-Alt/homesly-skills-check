@@ -1,0 +1,62 @@
+# Homesly Skills Check
+
+A daily WordPress skills assessment for the Homesly Stays web team. Each person gets 15 questions a day about the real changes on their own hotel websites: 11 from their question bank and 4 written fresh by Claude. Answers are marked on the server and explained afterwards. Managers see the whole team's results.
+
+- **Site:** static HTML/JS, hosted on GitHub Pages.
+- **Logins, database and marking:** Supabase (email sign-in links, Postgres with row-level security, one Edge Function).
+- **Answer keys** live only in the database, never in this repo.
+
+## How people sign in
+
+**Employees (Harshith, Sai Lakshmi)**
+1. Open the site and enter your `@homeslystays.com` email.
+2. Click the sign-in link we email you. Open it on the same device and browser.
+3. Take today's assessment from the Overview page. You get one attempt per day, with 25 minutes once you start.
+
+**Manager**
+1. Sign in the same way with your own `@homeslystays.com` email.
+2. You land on **Team overview**: today's status, scores, trends and anything waiting to be marked.
+3. Use **People & access** to add or remove people and choose whose sites each employee is tested on.
+
+Any other email domain is refused at sign-in. Someone with a company email who isn't listed under People & access sees a "not set up yet" message.
+
+## One-time setup
+
+1. **Create a Supabase project** (free) at supabase.com. Then note the Project URL and the `anon` key from Project Settings → API.
+2. **Fill in `assets/config.js`** with those two values. Both are safe to publish.
+3. **Link and deploy** from this folder:
+   ```bash
+   npx supabase@2 login
+   npx supabase@2 link --project-ref <your-project-ref>
+   npx supabase@2 db push
+   npx supabase@2 functions deploy api
+   ```
+4. **Set secrets.** Run these yourself; never commit the values.
+   ```bash
+   npx supabase@2 secrets set ANTHROPIC_API_KEY=<your key>
+   npx supabase@2 secrets set ALLOWED_ORIGIN=https://<github-user-or-org>.github.io
+   node scripts/set-import-token.mjs
+   ```
+5. **Load the question banks** from the private folder:
+   ```bash
+   node scripts/import-bank.mjs
+   ```
+6. **Configure sign-in emails** in Supabase → Authentication:
+   - URL Configuration: set Site URL and Redirect URLs to the GitHub Pages address.
+   - Emails → SMTP: add your own mail server (e.g. Google Workspace SMTP, Resend or Brevo). Supabase's built-in sender only delivers to project team members and is heavily rate-limited, so staff won't get links without this.
+7. **Add yourself as the first manager.** In the SQL Editor run:
+   ```sql
+   insert into staff (email, full_name, role) values ('<you>@homeslystays.com', '<Your name>', 'manager');
+   ```
+   Add everyone else from **People & access** in the app.
+
+## Weekly refresh
+
+Every Friday a scheduled Claude task reads the week's commits in `Homeslystays/Homesly_website`. It adds new facts and questions to `private-bank/`, retires outdated ones, and runs `node scripts/import-bank.mjs`.
+
+## Preview the design without a backend
+
+```bash
+npm run preview
+```
+Then open `http://localhost:5178/?demo`. Sign in as `manager@homeslystays.com`, `harshith@…` or `sai@…`. Nothing is saved.

@@ -211,7 +211,7 @@ function renderSignIn(state = {}) {
         </ul>
       </div>
       <div class="preview-card" aria-hidden="true">
-        <div class="row between"><span class="eyebrow" style="color:#9FD6C3">Question 4 of 15</span><span class="chip site" style="background:rgba(255,255,255,.1);color:#DDF0E9">thegeorgehotel.uk</span></div>
+        <div class="row between"><span class="eyebrow">Question 4 of 15</span><span class="chip site">thegeorgehotel.uk</span></div>
         <p class="pq">Why do the room "Book Now" buttons open the availability popup instead of going straight to the booking engine?</p>
         <div class="po"><i></i>It loads faster on phones</div>
         <div class="po on"><i></i>Every booking is captured as a lead first</div>
@@ -350,6 +350,12 @@ function metrics(history) {
   const best = hist.reduce((m, x) => Math.max(m, x.pct), 0);
   return { avg7, delta: avg7 != null && avgPrev != null ? avg7 - avgPrev : null, streak, count: hist.length, best };
 }
+function journey(t) {
+  const readToday = (S.data.reads || []).some((r) => r.read_at && localDate(new Date(r.read_at)) === localDate());
+  const cur = t && t.status === "done" ? 4 : t && t.status === "in_progress" ? 3 : readToday ? 2 : 1;
+  const steps = ["Read", "Check in", "Test", "Review"];
+  return `<nav class="journey" aria-label="Today's steps"><ol>${steps.map((x, i) => `<li class="${i + 1 < cur ? "done" : ""}"${i + 1 === cur ? ' aria-current="step"' : ""}><span class="n">${i + 1 < cur ? "✓" : i + 1}</span><span class="t">${x}</span></li>`).join("")}</ol></nav>`;
+}
 function renderOverview() {
   const emp = EMPLOYEES[S.staff.emp_key]; const st = S.data.stats || {}; const hist = st.history || []; const m = metrics(hist);
   const t = todayTest(); const now = Date.now();
@@ -374,8 +380,10 @@ function renderOverview() {
   }
   const recent = (S.data.tests || []).filter((x) => x.status === "done" && x.kind === "daily").slice(0, 5);
   paint("overview", `
-    <div class="page-h"><div><h1>${greeting()}, ${h(firstName(emp.name))}</h1><p class="sub">Your daily skills check across ${emp.sites.length} hotel websites.</p></div>
-      <div class="row" style="gap:6px">${emp.sites.slice(0, 3).map((s) => `<span class="chip site">${h(s)}</span>`).join("")}${emp.sites.length > 3 ? `<span class="chip">+${emp.sites.length - 3}</span>` : ""}</div></div>
+    <div class="hello"><span class="eyebrow">${h(fmtDay(localDate(), { weekday: "long", day: "numeric", month: "long" }))}</span><h1 class="h-display">${greeting()}, ${h(firstName(emp.name))}.</h1>
+      <p class="lede">${t && t.status === "done" ? "Today's check is done. Have a look at what you got right, then read a chapter for tomorrow." : "A fresh fifteen questions are waiting: read a little, check in on camera, then take the test."}</p>
+      <div class="row" style="gap:6px">${emp.sites.map((s) => `<span class="chip site">${h(s)}</span>`).join("")}</div></div>
+    ${journey(t)}
     <div class="stack" style="gap:20px">
       <section class="hero stack">${hero}</section>
       ${(() => { const book = bookFor(S.staff.emp_key); if (!book) return ""; const reads = readSet(S.staff.emp_key); const sug = suggestedChapter(book, reads, st.area_stats); const done = book.chapters.filter((c) => reads.has(c.id)).length;

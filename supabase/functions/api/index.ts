@@ -7,6 +7,7 @@ import {
   type Fact, type Grade, type Question, type Stats,
 } from "./engine.ts";
 import { markWrittenAnswers, writeFreshQuestions } from "./claude.ts";
+import { hiringAction, importRole } from "./hiring.ts";
 
 const ALLOWED_ORIGIN = Deno.env.get("ALLOWED_ORIGIN") || "*";
 const TIMEZONE = Deno.env.get("TEST_TIMEZONE") || "Asia/Kolkata";
@@ -206,6 +207,13 @@ Deno.serve(async (req) => {
   try { body = await req.json(); } catch { return fail("Invalid JSON."); }
   try {
     if (body.action === "import") return await importBank(req, body as never);
+    const hctx = {
+      admin, json, fail,
+      manager: async () => { const u = await caller(req); return u?.staff?.role === "manager" ? { email: u.email } : null; },
+    };
+    if (body.action === "import_role") return await importRole(req, hctx, body);
+    const hired = await hiringAction(req, hctx, body);
+    if (hired) return hired;
     const user = await caller(req);
     if (!user) return fail("Please sign in with your Homesly email.", 401);
     if (body.action === "start") return await start(user, body as never);

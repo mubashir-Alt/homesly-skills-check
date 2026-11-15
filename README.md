@@ -50,6 +50,40 @@ Any other email domain is refused at sign-in. Someone with a company email who i
    ```
    Add everyone else from **People & access** in the app.
 
+## Hiring assessments
+
+Managers have a **Hiring** area for shortlisted candidates (after the verbal interview, before the operations round).
+
+1. **New assessment from a JD.** Upload a Word, PDF or text JD, or paste it. Claude writes the candidate brief (using one of our hotels), a live **Part A**, the **Part B** take-home tasks, a weighted **scorecard** in plain English with red flags, and **follow-up questions** for the review call. Read it, edit it (Edit tab), then save it as Live.
+2. **Add a candidate.** You get a private link (shown once) and a ready-to-send message. Candidates don't sign in.
+3. **The candidate** reads the brief and agrees to the rules and privacy terms. Their **48 hours** start then.
+   - **Part A** (about 50 minutes, one sitting, laptop or desktop): camera on with a face check, **entire screen shared**, full screen, copy/paste off, leaving the page logged. A camera still about every 30 s and a screenshot about every 60 s are taken, plus both at every warning. 5 strikes submit Part A automatically. Numbers questions are marked automatically, and Claude suggests marks for written answers.
+   - **Part B**: upload files (up to 50 MB each) or paste links per task, declare AI tools, and confirm the work is their own. Progress saves as they go. The server refuses late work.
+4. **Review** on the candidate's page: progress, integrity events, captures, Part A answers with the marking guide, Part B files, then score each task 0–10 by clicking the matching description. The total and the Hire / Second round / Reject recommendation update as you go. Run the review call with the follow-up questions and note what they said.
+
+Security: candidate tables and the `hiring` storage bucket aren't readable from the browser except by managers. Candidates act only through the API, using a random token that's stored as a hash. Files are read through 1-hour signed links. Answer keys and scorecards live in `private-bank/roles/` (never committed) and in the database. Delete captures from the candidate page once you've decided (candidates are told it's within 6 months). Treat warnings as signals and look at the captures before rejecting anyone. Proctoring can't fully rule out a second device out of camera view, which is why the review call matters.
+
+### Set it up
+
+```bash
+npx supabase@2 db push
+npx supabase@2 functions deploy api
+node scripts/import-roles.mjs
+```
+
+`import-roles` loads every pack in `private-bank/roles/` (the Social Media Marketing Executive pack is there already). New roles made in the app don't need it.
+
+Preview without a backend: `npm run preview`, open `http://localhost:5178/?demo`, sign in as `manager@homeslystays.com` and choose **Hiring**. Demo data stays in your browser.
+
+### Your own subdomain (e.g. `careers.homeslystays.com`)
+
+1. In GitHub → Settings → Pages, set **Custom domain** to the subdomain (this adds a `CNAME` file) and tick **Enforce HTTPS**.
+2. At your DNS provider, add a `CNAME` record from the subdomain to `mubashir-alt.github.io`.
+3. Supabase → Authentication → URL Configuration: add `https://careers.homeslystays.com/` to the Site URL / Redirect URLs (also in `supabase/config.toml`).
+4. `npx supabase@2 secrets set ALLOWED_ORIGIN=https://careers.homeslystays.com`
+
+You can link to it from a GoHighLevel sub-account page or email; the site itself stays on GitHub Pages and Supabase.
+
 ## Weekly refresh
 
 Every Friday a scheduled Claude task reads the week's commits in `Homeslystays/Homesly_website`. It adds new facts and questions to `private-bank/`, retires outdated ones, and runs `node scripts/import-bank.mjs`.

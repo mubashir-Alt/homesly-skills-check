@@ -144,6 +144,67 @@ const API = DEMO ? null : {
   async staffDelete(email) { must(await sb.from("staff").delete().eq("email", email)); },
 };
 
+/* ============================================================ hiring data layer */
+// Candidates have no account: their calls carry only the private token from their link.
+async function candApi(body) {
+  const res = await fetch(`${CONFIG.supabaseUrl}/functions/v1/api`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${CONFIG.supabaseAnonKey}`, apikey: CONFIG.supabaseAnonKey },
+    body: JSON.stringify(body),
+  });
+  const out = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(out.error || "The server didn't respond. Check your connection and try again.");
+  return out;
+}
+async function putSigned(path, token, blob) {
+  const { error } = await sb.storage.from("hiring").uploadToSignedUrl(path, token, blob, { contentType: blob.type || "application/octet-stream", upsert: false });
+  if (error) throw new Error(error.message);
+}
+const CAND_COLS = "id,role_id,full_name,email,phone,cv_path,notes,pack,link_expires_at,status,accepted_at,deadline_at,consent,timed_started_at,timed_deadline_at,timed_submitted_at,timed_auto,timed_answers,timed_marks,integrity,devices,takehome,submitted_at,review,created_by,created_at";
+const HAPI_LIVE = DEMO ? null : {
+  async load() {
+    const [roles, candidates] = await Promise.all([
+      sb.from("hiring_roles").select("id,title,summary,status,pack,created_at,updated_at").order("created_at", { ascending: false }).then(must),
+      sb.from("candidates").select(CAND_COLS).order("created_at", { ascending: false }).limit(500).then(must),
+    ]);
+    return { roles: roles || [], candidates: candidates || [] };
+  },
+  async saveRole(r) { must(await sb.from("hiring_roles").upsert({ id: r.id, title: r.title, summary: r.summary, jd_text: r.jd_text, pack: r.pack, status: r.status, created_by: r.created_by || S.user.email, updated_at: new Date().toISOString() })); },
+  async generate(b) { return (await callApi({ action: "hire_generate", ...b })).pack; },
+  async invite({ cv, ...row }) {
+    const out = await callApi({ action: "hire_invite", ...row, cv: cv ? { name: cv.name } : null });
+    if (cv && out.cvUpload) await putSigned(out.cvUpload.path, out.cvUpload.token, cv).catch(() => toast("The CV didn't upload, but the candidate was added."));
+    return out;
+  },
+  async newLink(id) { return callApi({ action: "hire_new_link", candidate_id: id }); },
+  async extend(id, hours) { return callApi({ action: "hire_extend", candidate_id: id, hours }); },
+  async candidate(id) { return must(await sb.from("candidates").select(CAND_COLS).eq("id", id).maybeSingle()); },
+  async files(id) { return callApi({ action: "hire_files", candidate_id: id }); },
+  async review(id, review) { return callApi({ action: "hire_review", candidate_id: id, review }); },
+  async purge(id) { return callApi({ action: "hire_purge_captures", candidate_id: id }); },
+  async remove(id) { return callApi({ action: "hire_delete", candidate_id: id }); },
+  // candidate side (token only)
+  cOpen: (token) => candApi({ action: "cand_open", token }),
+  cAccept: (token, consent) => candApi({ action: "cand_accept", token, consent }),
+  cStart: (token) => candApi({ action: "cand_timed_start", token }),
+  cSave: (token, answers, integrity) => candApi({ action: "cand_timed_save", token, answers, integrity }),
+  cSubmitTimed: (token, answers, integrity, auto) => candApi({ action: "cand_timed_submit", token, answers, integrity, auto }),
+  async cCapture(token, kind, reason, t, blob) { const out = await candApi({ action: "cand_capture", token, kind, reason, t }); if (out.skip) return; await putSigned(out.path, out.token, blob); },
+  async cUpload(token, task, file) { const out = await candApi({ action: "cand_upload", token, task, name: file.name, size: file.size }); await putSigned(out.path, out.token, file); return out.path; },
+  cSaveTakehome: (token, takehome) => candApi({ action: "cand_takehome_save", token, takehome }),
+  cSubmit: (token, takehome) => candApi({ action: "cand_submit", token, takehome }),
+};
+let hiringMod = null;
+async function hiring() {
+  if (hiringMod) return hiringMod;
+  const [adm, cand] = await Promise.all([import("./hiring-admin.js"), import("./candidate.js")]);
+  const HAPI = DEMO ? (await import("./demo.js")).demoHiring : HAPI_LIVE;
+  const ctx = { S, app, h, md, ICON, toast, modal, closeModal, go, fmtClock, fmtDay, kpi, initials, themeButton, DEMO, HAPI,
+    paint: (active, inner) => paint(active, inner) };
+  hiringMod = { manager: (parts) => adm.renderHiring(ctx, parts), candidate: (token) => cand.renderCandidate(ctx, token) };
+  return hiringMod;
+}
+
 /* ============================================================ boot & routing */
 async function boot() {
   if (DEMO) { const { demoApi } = await import("./demo.js"); Object.assign(window, { __API: demoApi }); }
@@ -159,6 +220,8 @@ const isNetErr = (e) => e instanceof TypeError && /fetch|network|load failed/i.t
 async function route(reload = false, attempt = 0) {
   const api = S.api;
   try {
+    const hp = (location.hash || "").replace(/^#/, "").split("/");
+    if (hp[1] === "c" && hp[2]) return (await hiring()).candidate(hp[2]);
     if (reload) {
       const session = await api.session();
       if (!session) { S.user = null; S.staff = null; S.data = null; return renderSignIn(); }
@@ -181,6 +244,7 @@ async function route(reload = false, attempt = 0) {
       if (page === "person" && EMPLOYEES[arg]) return renderPerson(arg);
       if (page === "people") return renderPeople();
       if (page === "bank") return renderBank();
+      if (page === "hiring") return (await hiring()).manager(hp.slice(2));
       return renderTeam();
     }
     if (page === "results") return renderHistory();
@@ -263,7 +327,7 @@ function shell(active, inner) {
   const mgr = S.staff.role === "manager";
   const pending = mgr ? (S.data.tests || []).reduce((a, t) => a + (t.score?.pending || 0), 0) : 0;
   const items = mgr
-    ? [["team", "Team overview", ICON.home], ["people", "People & access", ICON.key], ["bank", "Question bank", ICON.layers], ["textbook", "Textbooks & syllabus", ICON.book]]
+    ? [["team", "Team overview", ICON.home], ["people", "People & access", ICON.key], ["bank", "Question bank", ICON.layers], ["textbook", "Textbooks & syllabus", ICON.book], ["hiring", "Hiring", ICON.users]]
     : [["overview", "Overview", ICON.home], ["textbook", "Textbook & syllabus", ICON.book], ["results", "My results", ICON.chart], ["study", "Quick notes", ICON.clip]];
   const persons = mgr ? Object.values(EMPLOYEES).map((e) => `<a href="#/person/${e.key}" class="${active === "person-" + e.key ? "on" : ""}"><span class="avatar" style="width:22px;height:22px;font-size:10px;background:var(--side-2);color:#9FE3CB">${initials(e.name)}</span>${h(e.name)}</a>`).join("") : "";
   return `<div class="shell ${S.menu ? "menu-open" : ""}">

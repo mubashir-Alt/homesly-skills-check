@@ -85,7 +85,8 @@ function readDetections(res) {
 }
 
 export class Proctor {
-  constructor({ startedAt, initial = {}, onLog, onAutoSubmit }) {
+  constructor({ startedAt, initial = {}, onLog, onAutoSubmit, onEvent, onScreen, audience = "your manager" }) {
+    this.onEvent = onEvent; this.onScreen = onScreen; this.audience = audience;
     this.startedAt = startedAt;
     this.log = { strikes: initial.strikes || 0, tabAways: initial.tabAways || 0, pastes: initial.pastes || 0, events: (initial.events || []).slice(-150) };
     this.onLog = onLog; this.onAutoSubmit = onAutoSubmit;
@@ -258,9 +259,11 @@ export class Proctor {
   }
   elapsed() { return Math.max(0, Math.round((Date.now() - new Date(this.startedAt).getTime()) / 1000)); }
   record(type, detail, extra = {}) {
-    this.log.events.push({ t: this.elapsed(), type, detail, ...extra });
+    const entry = { t: this.elapsed(), type, detail, ...extra };
+    this.log.events.push(entry);
     if (this.log.events.length > 150) this.log.events.shift();
     this.onLog?.(this.log);
+    try { this.onEvent?.(entry); } catch { /* capture hooks must never break the test */ }
   }
   strike(type, detail, extra) {
     const now = Date.now();
@@ -268,7 +271,7 @@ export class Proctor {
     this.lastStrikeAt = now; this.log.strikes++;
     this.record(type, detail, { ...extra, strike: this.log.strikes });
     this.paintDock();
-    if (this.log.strikes >= MAX_STRIKES) { this.showModal("final", { title: "Test submitted", body: `You reached ${MAX_STRIKES} strikes, so the assessment was submitted automatically. Your manager can see what happened.` }); setTimeout(() => this.onAutoSubmit?.(), 1800); }
+    if (this.log.strikes >= MAX_STRIKES) { this.showModal("final", { title: "Test submitted", body: `You reached ${MAX_STRIKES} strikes, so the assessment was submitted automatically. ${this.audience[0].toUpperCase() + this.audience.slice(1)} can see what happened.` }); setTimeout(() => this.onAutoSubmit?.(), 1800); }
   }
 
   watchFace() {
@@ -284,6 +287,7 @@ export class Proctor {
   }
   awayCheck() {
     if (!this.running) return;
+    if (this.pauseAway) { this.awayStart = 0; return; } // the browser's own screen-share picker has focus
     const away = document.hidden || !document.hasFocus();
     if (away && !this.awayStart) { this.awayStart = Date.now(); return; }
     if (!away && this.awayStart) {
@@ -341,7 +345,7 @@ export class Proctor {
     const icon = `<span class="pm-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M12 3 2 20h20zM12 10v4M12 17h.01"/></svg></span>`;
     const box = (title, sub, body, btn) => `<div class="proctor-modal"><div class="row" style="gap:12px;flex-wrap:nowrap">${icon}<div><div class="pm-title" id="pm-title">${title}</div><div class="pm-sub">${sub}</div></div></div>${body}${btn}</div>`;
     if (kind === "face") {
-      el.innerHTML = box("Look at the screen", "Face the camera to continue.", `<div class="pm-cam"></div><div class="pm-state"></div>${strikes}<p class="pm-p">This was logged for your manager. At ${MAX_STRIKES} strikes the test submits itself.</p>`, `<div class="row"><button class="btn primary lg" data-pm="continue" disabled>I'm back. Continue</button><button class="btn" data-pm="cam" hidden>Restart camera</button></div>`);
+      el.innerHTML = box("Look at the screen", "Face the camera to continue.", `<div class="pm-cam"></div><div class="pm-state"></div>${strikes}<p class="pm-p">This was logged for ${this.audience}. At ${MAX_STRIKES} strikes the test submits itself.</p>`, `<div class="row"><button class="btn primary lg" data-pm="continue" disabled>I'm back. Continue</button><button class="btn" data-pm="cam" hidden>Restart camera</button></div>`);
       this.beep(true);
     } else if (kind === "away") {
       el.innerHTML = box("You left the test page", `Away for ${data.secs} seconds.`, `${strikes}<p class="pm-p">Stay on this page until you submit. Switching tabs, apps or windows is logged.</p>`, `<button class="btn primary lg" data-pm="ok">Back to my test</button>`);
@@ -350,6 +354,9 @@ export class Proctor {
     } else if (kind === "idle") {
       el.innerHTML = box("Are you still there?", `No activity for ${Math.round(IDLE_MS / 1000)} seconds.`, `<p class="pm-p">Click below within ${Math.round(IDLE_ANSWER_MS / 1000)} seconds, or it counts as a strike.</p>`, `<button class="btn primary lg" data-pm="ok">I'm here</button>`);
       this.beep(true);
+    } else if (kind === "screen") {
+      el.innerHTML = box("Share your whole screen again", "Screen sharing stopped.", `${strikes}<p class="pm-p">Part A needs your entire screen shared until you submit. Choose <b>Entire screen</b> when your browser asks.</p><p class="pm-p pm-err" hidden></p>`, `<button class="btn primary lg" data-pm="screen">Share entire screen</button>`);
+      this.beep(true);
     } else if (kind === "final") {
       el.innerHTML = box(data.title, "", `<p class="pm-p">${data.body}</p>`, "");
     }
@@ -357,6 +364,12 @@ export class Proctor {
       const b = e.target.closest("[data-pm]"); if (!b) return;
       if (b.dataset.pm === "cam") { this.lastRestart = 0; await this.restartCamera("manual"); return; }
       if (b.dataset.pm === "fs") await Proctor.enterFullscreen();
+      if (b.dataset.pm === "screen") {
+        this.pauseAway = true;
+        const err = await this.onScreen?.().finally(() => { this.pauseAway = false; this.awayStart = 0; });
+        if (err) { const p = el.querySelector(".pm-err"); if (p) { p.hidden = false; p.textContent = err; } return; }
+        await Proctor.enterFullscreen();
+      }
       if (b.dataset.pm === "continue" && BAD.has(this.face)) return;
       this.lastActivity = Date.now(); this.badSince = 0; this.hist = []; this.closeModal(); this.mountDock();
     });

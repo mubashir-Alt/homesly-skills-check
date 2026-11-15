@@ -10,16 +10,16 @@ function getClient(): Anthropic | null {
 }
 
 /** One request with structured JSON output. Server-side refusal fallback is on. */
-async function askJson<T>(prompt: string, schema: Record<string, unknown>, timeoutMs: number): Promise<T | null> {
+export async function askJson<T>(prompt: string | unknown[], schema: Record<string, unknown>, timeoutMs: number, effort = "low", maxTokens = 16000): Promise<T | null> {
   const c = getClient();
   if (!c) return null;
   const res = await c.beta.messages.create(
     {
       model: MODEL,
-      max_tokens: 16000,
+      max_tokens: maxTokens,
       betas: ["server-side-fallback-2026-07-01"],
       fallbacks: "default",
-      output_config: { effort: "low", format: { type: "json_schema", schema } },
+      output_config: { effort, format: { type: "json_schema", schema } },
       messages: [{ role: "user", content: prompt }],
     } as never,
     { timeout: timeoutMs, maxRetries: 1 },

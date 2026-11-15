@@ -302,12 +302,12 @@ function renderExam() {
     </div><div class="progress"><i style="width:${(100 * done) / n}%"></i></div></header>
     <div class="exam-body">
       <aside class="qnav" aria-label="Questions"><span class="eyebrow">Questions</span>
-        ${["A", "B"].map((sec) => { const idx = qs.map((x, i) => [x, i]).filter(([x]) => secOf(x) === sec); if (!idx.length) return "";
-          return `<span class="xs muted" style="margin-top:4px">${sec === "A" ? "Section 1 · quick questions" : "Section 2 · written tasks"}</span><div class="qnav-grid">${idx.map(([x, i]) => `<button class="qn ${i === C.cur ? "cur" : ""} ${isAns(x, C.answers[x.id]) ? "ans" : ""}" data-c="goto" data-i="${i}" aria-label="Question ${i + 1}">${i + 1}</button>`).join("")}</div>`; }).join("")}
+        ${["A", "B"].map((sec) => { const idx = qs.map((x, i) => [x, i]).filter(([x]) => secOf(x) === sec); if (!idx.length) return ""; const one = idx.length === qs.length;
+          return `${one ? "" : `<span class="xs muted" style="margin-top:4px">${sec === "A" ? "Section 1 · quick questions" : "Section 2 · written tasks"}</span>`}<div class="qnav-grid">${idx.map(([x, i]) => `<button class="qn ${i === C.cur ? "cur" : ""} ${isAns(x, C.answers[x.id]) ? "ans" : ""}" data-c="goto" data-i="${i}" aria-label="Question ${i + 1}">${i + 1}</button>`).join("")}</div>`; }).join("")}
         <div class="legend"><span><i class="a"></i>Answered</span><span><i></i>Not answered</span></div>
         <p class="xs muted">Answers save automatically.</p></aside>
       <section class="qpane"><article class="qcard fade-in" aria-labelledby="qprompt">
-        <div class="qhead"><span class="qno">${String(C.cur + 1).padStart(2, "0")}<small>/ ${n}</small></span><span class="grow"></span><span class="chip accent">Section ${secOf(q) === "A" ? 1 : 2}</span><span class="chip">${q.type === "single" ? "Choose one" : "Written answer"}</span></div>
+        <div class="qhead"><span class="qno">${String(C.cur + 1).padStart(2, "0")}<small>/ ${n}</small></span><span class="grow"></span>${qs.every((x) => secOf(x) === secOf(q)) ? "" : `<span class="chip accent">Section ${secOf(q) === "A" ? 1 : 2}</span>`}<span class="chip">${q.type === "single" ? "Choose one" : "Written answer"}</span></div>
         ${q.context ? `<div class="hb-context">${q.context.split("\n").map((l) => `<div>${h(l)}</div>`).join("")}</div>` : ""}
         <p class="qprompt" id="qprompt">${h(q.prompt)}</p>
         ${q.type === "single"

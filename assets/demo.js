@@ -123,7 +123,7 @@ export const demoApi = {
 /* ============================================================ hiring (demo) */
 // Roles and candidates are kept in this browser's localStorage so a candidate link opened in another tab
 // still works. Captures and uploads stay in memory (this tab only). Nothing leaves the browser.
-const HK = "hsc-demo-hiring-v2";
+const HK = "hsc-demo-hiring-v3";
 const hs = (() => { try { return JSON.parse(localStorage.getItem(HK)) || null; } catch { return null; } })() || { roles: [], cands: [] };
 const persist = () => { try { localStorage.setItem(HK, JSON.stringify(hs)); } catch { /* private mode */ } };
 const blobs = {}; const caps = {};

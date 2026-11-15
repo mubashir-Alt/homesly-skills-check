@@ -282,6 +282,10 @@ async function renderCand(id) {
   const c = await X.HAPI.candidate(id);
   if (!c) return X.paint("hiring", `<div class="empty">Candidate not found. <a href="#/hiring">Back</a></div>`);
   H.cand = c; H.review = JSON.parse(JSON.stringify(c.review || {})); H.review.scores ||= {}; H.review.notes ||= {}; H.review.flags ||= []; H.review.followups ||= {};
+  if (c.timed_submitted_at && !Object.keys(H.review.scores).length && !c.pack.timed.questions.some((q) => q.type === "short")) {
+    for (const t of c.pack.scorecard.tasks) { const v = suggestFor(c, t); if (v != null) H.review.scores[t.id] = v; }
+    H.prefilled = true;
+  } else H.prefilled = false;
   H.files = { urls: {}, captures: [] };
   try { H.files = await X.HAPI.files(id); } catch (e) { X.toast(e.message); }
   paintCand();
@@ -319,7 +323,9 @@ function summary(c) {
   return `<section class="card stack"><div class="card-h" style="margin:0"><h3>At a glance</h3>${s.rec ? `<span class="chip ${s.rec[1]}">Scorecard says: ${s.rec[0]} · ${s.total}/100</span>` : `<span class="xs muted">Score the areas below to get a recommendation</span>`}</div>
     <div class="sum-grid">
       <div class="kpi"><span class="eyebrow">Quick questions</span><span class="v">${n ? `${n.right}<small>/${n.of}</small>` : "–"}</span><span class="d">${n ? Math.round((100 * n.right) / Math.max(1, n.of)) + "% right" : ""}</span></div>
-      <div class="kpi"><span class="eyebrow">Written (AI suggestion)</span><span class="v">${wAvg == null ? "–" : `${wAvg}<small>/10</small>`}</span><span class="d">Average over ${written.length} answers</span></div>
+      ${c.pack.timed.questions.some((q) => q.type === "short")
+        ? `<div class="kpi"><span class="eyebrow">Written (AI suggestion)</span><span class="v">${wAvg == null ? "–" : `${wAvg}<small>/10</small>`}</span><span class="d">Average over ${written.length} answers</span></div>`
+        : (() => { const qs = c.pack.timed.questions; const ans = qs.filter((q) => (c.timed_answers || {})[q.id] != null).length; return `<div class="kpi"><span class="eyebrow">Answered</span><span class="v">${ans}<small>/${qs.length}</small></span><span class="d">${qs.length - ans} left blank</span></div>`; })()}
       <div class="kpi"><span class="eyebrow">Integrity</span><span class="v">${ig.strikes || 0}<small> strikes</small></span><span class="d">${(ig.tabAways || 0)} page leaves${ips > 1 ? ` · ${ips} connections` : ""}</span></div>
       <div class="kpi"><span class="eyebrow">Time used</span><span class="v">${mins == null ? "–" : `${mins}<small> min</small>`}</span><span class="d">${c.timed_auto ? "Submitted automatically" : "Submitted by them"}</span></div>
     </div>
@@ -371,17 +377,17 @@ function partA(c) {
   const { h } = X; const m = c.timed_marks || {}; const a = c.timed_answers || {}; const n = m._numbers;
   const mcq = qs.map((q, i) => [q, i]).filter(([q]) => q.type === "single");
   const wr = qs.map((q, i) => [q, i]).filter(([q]) => q.type === "short");
-  return `<section class="card stack"><div class="card-h" style="margin:0"><h3>Section 1 · quick questions</h3>${n ? `<span class="chip ${n.right >= n.of * 0.75 ? "good" : n.right >= n.of / 2 ? "warn" : "bad"}">${n.right} of ${n.of} right</span>` : ""}</div>
+  return `<section class="card stack"><div class="card-h" style="margin:0"><h3>${wr.length ? "Section 1 · quick questions" : "Answers"}</h3>${n ? `<span class="chip ${n.right >= n.of * 0.75 ? "good" : n.right >= n.of / 2 ? "warn" : "bad"}">${n.right} of ${n.of} right</span>` : ""}</div>
     <div class="tablebox"><table class="mcq-table"><thead><tr><th>#</th><th>Question</th><th>Their answer</th><th></th></tr></thead><tbody>
     ${mcq.map(([q, i]) => { const ans = a[q.id]; const ok = m[q.id]?.correct; return `<tr><td>${i + 1}</td><td>${h(q.prompt)}</td><td>${ans == null ? '<span class="muted">No answer</span>' : h(q.options[ans])}${ok || ans == null ? "" : `<div class="xs muted">Right answer: ${h(q.options[q.answer])}</div>`}</td><td>${ans == null ? '<span class="chip">–</span>' : ok ? '<span class="chip good">✓</span>' : '<span class="chip bad">✗</span>'}</td></tr>`; }).join("")}
     </tbody></table></div></section>
-  <section class="card stack"><div class="card-h" style="margin:0"><div><h3>Section 2 · written answers</h3><p class="xs muted" style="margin-top:2px">Click each one to read the answer, the AI note and what a good answer has.</p></div></div>
+  ${wr.length ? `<section class="card stack"><div class="card-h" style="margin:0"><div><h3>Section 2 · written answers</h3><p class="xs muted" style="margin-top:2px">Click each one to read the answer, the AI note and what a good answer has.</p></div></div>
     <div>${wr.map(([q, i]) => { const mk = m[q.id] || {}; const ans = a[q.id]; const wc = (String(ans || "").match(/\S+/g) || []).length;
       return `<details class="wr"><summary><span class="qno" style="font-size:18px">${String(i + 1).padStart(2, "0")}</span><span class="grow" style="font-weight:500">${h(q.prompt)}</span>${Number.isFinite(mk.score) ? `<span class="chip ${mk.score >= 7 ? "good" : mk.score >= 5 ? "warn" : "bad"}">${mk.ai ? "AI " : ""}${mk.score}/10</span>` : '<span class="chip warn">Not marked</span>'}<span class="xs muted">${wc} words</span></summary>
         <div class="rv">${q.context ? `<div class="hb-context">${q.context.split("\n").map((l) => `<div>${h(l)}</div>`).join("")}</div>` : ""}
         <div class="ans"><span class="k">Their answer</span><span style="white-space:pre-wrap">${h(ans || "No answer")}</span></div>
         ${mk.reason ? `<p class="why"><b>${mk.ai ? "AI note." : "Note."}</b> ${h(mk.reason)}</p>` : ""}
-        <p class="why"><b>A good answer.</b> ${h(q.guide)}</p></div></details>`; }).join("")}</div></section>`;
+        <p class="why"><b>A good answer.</b> ${h(q.guide)}</p></div></details>`; }).join("")}</div></section>` : ""}`;
 }
 function partAOld(c) {
   const { h } = X; const qs = c.pack.timed.questions; const m = c.timed_marks || {}; const a = c.timed_answers || {};
@@ -419,7 +425,7 @@ function suggestFor(c, t) {
 }
 function scoreForm(c) {
   const { h } = X; const p = c.pack; const r = H.review; const s = computeScore(p, r);
-  return `<section class="card stack" id="scoreform"><div class="card-h" style="margin:0"><div><h3>Scorecard</h3><p class="xs muted" style="margin-top:2px">Score each task out of 10. Click the description that fits best, then adjust.</p></div></div>
+  return `<section class="card stack" id="scoreform"><div class="card-h" style="margin:0"><div><h3>Scorecard</h3><p class="xs muted" style="margin-top:2px">${H.prefilled ? "Filled in automatically from the right answers. Check the captures, adjust if needed, then save." : "Score each area out of 10. Click the description that fits best, then adjust."}</p></div></div>
     ${p.scorecard.tasks.map((t) => { const v = r.scores[t.id]; const sug = suggestFor(c, t);
       return `<div class="sc-task"><div class="row between"><div><b style="font-size:15.5px">${h(t.title)}</b> <span class="xs muted">${hasB(p) ? (t.part === "timed" ? "Part A · " : "Part B · ") : ""}weight ${t.weight}</span></div>
         <div class="row" style="gap:8px">${sug != null ? `<span class="xs muted">AI suggests ${sug}</span>` : ""}<span class="sc-val">${Number.isFinite(v) ? v : "–"}<small>/10</small></span></div></div>

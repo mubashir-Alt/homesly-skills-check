@@ -146,13 +146,21 @@ const API = DEMO ? null : {
 
 /* ============================================================ hiring data layer */
 // Candidates have no account: their calls carry only the private token from their link.
-async function candApi(body) {
-  const res = await fetch(`${CONFIG.supabaseUrl}/functions/v1/api`, {
+async function candApi(body, attempt = 0) {
+  let res;
+  try {
+    res = await fetch(`${CONFIG.supabaseUrl}/functions/v1/api`, {
     method: "POST",
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${CONFIG.supabaseAnonKey}`, apikey: CONFIG.supabaseAnonKey },
     body: JSON.stringify(body),
   });
+  } catch (e) {
+    if (attempt < 2) { await new Promise((r) => setTimeout(r, 1500 * (attempt + 1))); return candApi(body, attempt + 1); }
+    throw new Error("Couldn't reach the server. Check your internet connection and try again.");
+  }
   const out = await res.json().catch(() => ({}));
+  // Retry server-side hiccups (5xx) a couple of times before showing an error.
+  if (res.status >= 500 && attempt < 2) { await new Promise((r) => setTimeout(r, 1500 * (attempt + 1))); return candApi(body, attempt + 1); }
   if (!res.ok) throw new Error(out.error || "The server didn't respond. Check your connection and try again.");
   return out;
 }

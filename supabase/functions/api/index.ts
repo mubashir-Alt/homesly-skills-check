@@ -221,7 +221,7 @@ Deno.serve(async (req) => {
     if (body.action === "mark") return await mark(user, body as never);
     return fail("Unknown action.");
   } catch (e) {
-    console.error(e);
+    console.error("api error", body?.action, e);
     return fail("Something went wrong on the server. Try again in a moment.", 500);
   }
 });

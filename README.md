@@ -54,12 +54,14 @@ Any other email domain is refused at sign-in. Someone with a company email who i
 
 Managers have a **Hiring** area for shortlisted candidates (after the verbal interview, before the operations round).
 
-1. **New assessment from a JD.** Upload a Word, PDF or text JD, or paste it. Claude writes the candidate brief (using one of our hotels), a live **Part A**, the **Part B** take-home tasks, a weighted **scorecard** in plain English with red flags, and **follow-up questions** for the review call. Read it, edit it (Edit tab), then save it as Live.
-2. **Add a candidate.** You get a private link (shown once) and a ready-to-send message. Candidates don't sign in.
-3. **The candidate** reads the brief and agrees to the rules and privacy terms. Their **48 hours** start then.
-   - **Part A** (about 50 minutes, one sitting, laptop or desktop): camera on with a face check, **entire screen shared**, full screen, copy/paste off, leaving the page logged. A camera still about every 30 s and a screenshot about every 60 s are taken, plus both at every warning. 5 strikes submit Part A automatically. Numbers questions are marked automatically, and Claude suggests marks for written answers.
-   - **Part B**: upload files (up to 50 MB each) or paste links per task, declare AI tools, and confirm the work is their own. Progress saves as they go. The server refuses late work.
-4. **Review** on the candidate's page: progress, integrity events, captures, Part A answers with the marking guide, Part B files, then score each task 0–10 by clicking the matching description. The total and the Hire / Second round / Reject recommendation update as you go. Run the review call with the follow-up questions and note what they said.
+1. **New assessment from a JD.** Upload a Word, PDF or text JD, or paste it. Claude writes the candidate brief (using one of our hotels), **Section 1** quick multiple-choice questions, **Section 2** short written tasks, a weighted **scorecard** in plain English with red flags, and **follow-up questions** for the review call. Read it, edit it (Edit tab), then save it as Live.
+2. **Add a candidate.** You get a private link (shown once) and a ready-to-send message for email or WhatsApp. Candidates don't sign in. The link works for 7 days.
+3. **The candidate** reads the brief, agrees to the rules and privacy terms, checks their camera and screen, and takes the test in **one sitting (about 90 minutes)**. Nothing to make or upload: everything is typed in the portal.
+   - For the whole test: camera on with a face check, **entire screen shared**, full screen, copy and paste off, and leaving the page is logged. A camera still about every 30 s and a screenshot about every 60 s, plus both at every warning. 5 strikes submit the test automatically.
+   - Section 1 is marked automatically, and Claude suggests marks for Section 2. The test is submitted when they finish or when time runs out.
+4. **Review** on the candidate's page: **At a glance** (quick-question score, average AI mark, strikes, time used), the captures, a table of Section 1 answers, and each written answer with its marking guide. Score each area 0–10 by clicking the matching description; the total and the Hire / Second round / Reject recommendation update as you go. Run the review call with the follow-up questions and note what they said.
+
+(Roles created before this change keep their old two-part format with a 48-hour take-home.)
 
 Security: candidate tables and the `hiring` storage bucket aren't readable from the browser except by managers. Candidates act only through the API, using a random token that's stored as a hash. Files are read through 1-hour signed links. Answer keys and scorecards live in `private-bank/roles/` (never committed) and in the database. Delete captures from the candidate page once you've decided (candidates are told it's within 6 months). Treat warnings as signals and look at the captures before rejecting anyone. Proctoring can't fully rule out a second device out of camera view, which is why the review call matters.
 

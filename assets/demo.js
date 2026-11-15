@@ -123,21 +123,22 @@ export const demoApi = {
 /* ============================================================ hiring (demo) */
 // Roles and candidates are kept in this browser's localStorage so a candidate link opened in another tab
 // still works. Captures and uploads stay in memory (this tab only). Nothing leaves the browser.
-const HK = "hsc-demo-hiring";
+const HK = "hsc-demo-hiring-v2";
 const hs = (() => { try { return JSON.parse(localStorage.getItem(HK)) || null; } catch { return null; } })() || { roles: [], cands: [] };
 const persist = () => { try { localStorage.setItem(HK, JSON.stringify(hs)); } catch { /* private mode */ } };
 const blobs = {}; const caps = {};
 const isoNow = (ms = Date.now()) => new Date(ms).toISOString();
+const hasBd = (c) => (c.pack?.takehome?.tasks || []).length > 0;
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 const MINI_PACK = {
   role_title: "Demo role", summary: "A small sample assessment for previewing the hiring screens.",
   intro: "This is **demo mode**. The real role packs load from the server.",
   scenario: { name: "Coach House, Otterburn", type: "Country inn", location: "Otterburn, Northumberland", about: "Demo scenario.", guests: ["Walkers", "Couples"], social_now: ["Demo situation"], budget: "£300 per month", offer: "Demo offer", facts: ["Demo fact"], note: "Demo details." },
   timed: { minutes: 20, intro: "Two quick demo questions.", questions: [
-    { id: "a1", task_id: "t2", type: "single", prompt: "£100 spent, 10 leads. What is the cost per lead?", context: "", options: ["£1", "£10", "£100", "£0.10"], answer: 1, max_words: 0, guide: "£100 ÷ 10 = £10." },
-    { id: "a2", task_id: "t2", type: "short", prompt: "Reply to a guest who says the Wi-Fi was slow.", context: "", options: [], answer: -1, max_words: 80, guide: "Thank, apologise, say what's being fixed, invite them back." } ] },
-  takehome: { hours: 48, effort: "About 1 hour", intro: "One demo task.", tasks: [{ id: "t1", title: "Three Instagram captions", time_guide: "30 minutes", what: "Write three captions.", deliverable: "A document", format: "PDF or link" }] },
-  submission: "Upload or paste a link.", rules: ["Demo rule"],
+    { id: "a1", section: "A", task_id: "t2", type: "single", prompt: "£100 spent, 10 leads. What is the cost per lead?", context: "", options: ["£1", "£10", "£100", "£0.10"], answer: 1, max_words: 0, guide: "£100 ÷ 10 = £10." },
+    { id: "a2", section: "B", task_id: "t1", type: "short", prompt: "Reply to a guest who says the Wi-Fi was slow.", context: "", options: [], answer: -1, max_words: 80, guide: "Thank, apologise, say what's being fixed, invite them back." } ] },
+  takehome: { hours: 0, effort: "", intro: "", tasks: [] },
+  submission: "", rules: ["Demo rule"],
   scorecard: { tasks: [
     { id: "t1", title: "Captions", part: "takehome", weight: 60, look_for: ["Three captions"], band_10: "Excellent", band_7: "Good", band_4: "Weak", band_1: "Missing" },
     { id: "t2", title: "Part A", part: "timed", weight: 40, look_for: ["Correct number", "Kind reply"], band_10: "Excellent", band_7: "Good", band_4: "Weak", band_1: "Missing" } ],
@@ -174,10 +175,10 @@ async function doSeed() {
   persist();
 }
 const pubPack = (p) => ({ role_title: p.role_title, intro: p.intro, scenario: p.scenario, submission: p.submission, rules: p.rules, takehome: p.takehome,
-  timed: { minutes: p.timed.minutes, intro: p.timed.intro, questions: p.timed.questions.map((q) => ({ id: q.id, type: q.type, prompt: q.prompt, context: q.context, options: q.options, max_words: q.max_words })) } });
+  timed: { minutes: p.timed.minutes, intro: p.timed.intro, questions: p.timed.questions.map((q) => ({ id: q.id, section: q.section, type: q.type, prompt: q.prompt, context: q.context, options: q.options, max_words: q.max_words })) } });
 function view(c) {
   const t = Date.now(); const open = !!c.timed_started_at && !c.timed_submitted_at;
-  return { id: c.id, full_name: c.full_name, status: c.status, accepted_at: c.accepted_at, deadline_at: c.deadline_at, timed_started_at: c.timed_started_at, timed_deadline_at: c.timed_deadline_at,
+  return { id: c.id, full_name: c.full_name, status: c.status, accepted_at: c.accepted_at, deadline_at: c.deadline_at, link_expires_at: c.link_expires_at, timed_started_at: c.timed_started_at, timed_deadline_at: c.timed_deadline_at,
     timed_submitted_at: c.timed_submitted_at, timed_answers: open ? c.timed_answers : undefined, integrity: open ? c.integrity : undefined, takehome: c.takehome, submitted_at: c.submitted_at, server_now: isoNow(),
     expired: !c.accepted_at ? new Date(c.link_expires_at).getTime() < t : new Date(c.deadline_at).getTime() < t && !c.submitted_at, pack: pubPack(c.pack) };
 }
@@ -187,7 +188,7 @@ function finishTimed(c, auto) {
   const qs = c.pack.timed.questions; const m = {};
   qs.forEach((q) => { const a = c.timed_answers[q.id]; if (q.type === "single") m[q.id] = { correct: a === q.answer, answered: a != null }; else { const w = (String(a || "").match(/\S+/g) || []).length; m[q.id] = w ? { score: Math.min(9, 3 + Math.round(w / 15)), reason: "Demo suggestion based on length only. Live mode uses Claude and the marking guide.", ai: true } : { score: 0, reason: "No answer given." }; } });
   const single = qs.filter((q) => q.type === "single"); m._numbers = { right: single.filter((q) => m[q.id].correct).length, of: single.length };
-  Object.assign(c, { timed_marks: m, timed_auto: !!auto, timed_submitted_at: isoNow(), status: "part_a_done" });
+  Object.assign(c, { timed_marks: m, timed_auto: !!auto, timed_submitted_at: isoNow() }, hasBd(c) ? { status: "part_a_done" } : { status: "submitted", submitted_at: isoNow() });
 }
 
 export const demoHiring = {
@@ -198,7 +199,7 @@ export const demoHiring = {
     const role = hs.roles.find((r) => r.id === row.role_id); const token = "demo" + Math.random().toString(36).slice(2) + Math.random().toString(36).slice(2);
     const id = "demo-" + Date.now();
     hs.cands.unshift({ id, token, role_id: role.id, full_name: row.full_name, email: row.email || null, phone: row.phone || null, notes: row.notes || null, cv_path: cv ? `cv/${id}/${cv.name}` : null, pack: role.pack,
-      link_expires_at: isoNow(Date.now() + 14 * 86400_000), status: "invited", timed_answers: {}, integrity: {}, devices: [], takehome: { files: [], links: [] }, review: {}, created_at: isoNow() });
+      link_expires_at: isoNow(Date.now() + 7 * 86400_000), status: "invited", timed_answers: {}, integrity: {}, devices: [], takehome: { files: [], links: [] }, review: {}, created_at: isoNow() });
     if (cv) blobs[`cv/${id}/${cv.name}`] = URL.createObjectURL(cv);
     persist(); return { id, token };
   },
@@ -210,7 +211,7 @@ export const demoHiring = {
   async purge(id) { delete caps[id]; },
   async remove(id) { hs.cands = hs.cands.filter((x) => x.id !== id); persist(); },
   async cOpen(token) { await seed(); return { cand: view(byTok(token)) }; },
-  async cAccept(token, consent) { const c = byTok(token); if (!c.accepted_at) Object.assign(c, { accepted_at: isoNow(), deadline_at: isoNow(Date.now() + 48 * 3600_000), status: "accepted", consent }); persist(); return { cand: view(c) }; },
+  async cAccept(token, consent) { const c = byTok(token); if (!c.accepted_at) Object.assign(c, { accepted_at: isoNow(), deadline_at: hasBd(c) ? isoNow(Date.now() + 48 * 3600_000) : c.link_expires_at, status: "accepted", consent }); persist(); return { cand: view(c) }; },
   async cStart(token) {
     const c = byTok(token);
     if (!c.timed_started_at) Object.assign(c, { timed_started_at: isoNow(), timed_deadline_at: isoNow(Date.now() + c.pack.timed.minutes * 60_000), status: "part_a" });

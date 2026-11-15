@@ -28,7 +28,7 @@ type Cand = Record<string, any>;
 
 const BUCKET = "hiring";
 const TAKEHOME_HOURS = 48;
-const LINK_DAYS = 14;                // an unaccepted invite link works this long
+const LINK_DAYS = 7;                 // the candidate must start the test within this many days of the invite
 const MAX_CAPTURES = 600;            // per candidate (50 min ≈ 100 camera + 50 screen + warnings)
 const MAX_FILES = 25;
 const GRACE_MS = 30_000;
@@ -51,7 +51,7 @@ export function publicPack(p: RolePack) {
     takehome: p.takehome,
     timed: {
       minutes: p.timed.minutes, intro: p.timed.intro,
-      questions: p.timed.questions.map((q) => ({ id: q.id, type: q.type, prompt: q.prompt, context: q.context, options: q.options, max_words: q.max_words })),
+      questions: p.timed.questions.map((q) => ({ id: q.id, section: q.section || (q.type === "single" ? "A" : "B"), type: q.type, prompt: q.prompt, context: q.context, options: q.options, max_words: q.max_words })),
     },
   };
 }
@@ -59,7 +59,7 @@ function candView(c: Cand) {
   const t = now();
   const timedOpen = !!c.timed_started_at && !c.timed_submitted_at;
   return {
-    id: c.id, full_name: c.full_name, status: c.status, accepted_at: c.accepted_at, deadline_at: c.deadline_at,
+    id: c.id, full_name: c.full_name, status: c.status, accepted_at: c.accepted_at, deadline_at: c.deadline_at, link_expires_at: c.link_expires_at,
     timed_started_at: c.timed_started_at, timed_deadline_at: c.timed_deadline_at, timed_submitted_at: c.timed_submitted_at,
     timed_answers: timedOpen ? c.timed_answers : undefined, integrity: timedOpen ? c.integrity : undefined,
     takehome: c.takehome, submitted_at: c.submitted_at, server_now: iso(t),
@@ -78,6 +78,9 @@ async function byToken(ctx: Ctx, token: unknown): Promise<Cand | null> {
   return data;
 }
 async function touchDevice(ctx: Ctx, req: Request, c: Cand) {
+  try { await touchDeviceInner(ctx, req, c); } catch (e) { console.error("touchDevice", e); }
+}
+async function touchDeviceInner(ctx: Ctx, req: Request, c: Cand) {
   const d = device(req); const list = (c.devices || []) as Array<{ ip: string; ua: string; at: string; n?: number }>;
   const last = list[list.length - 1];
   if (last && last.ip === d.ip && last.ua === d.ua) return;
@@ -85,6 +88,8 @@ async function touchDevice(ctx: Ctx, req: Request, c: Cand) {
   await ctx.admin.from("candidates").update({ devices: next }).eq("id", c.id);
   c.devices = next;
 }
+/** Older packs had a 48-hour take-home with uploads; new ones are a single timed sitting. */
+const hasTakehome = (c: Cand) => (c.pack?.takehome?.tasks || []).length > 0;
 const timedLive = (c: Cand) => !!c.timed_started_at && !c.timed_submitted_at && now() <= new Date(c.timed_deadline_at).getTime() + GRACE_MS;
 const beforeDeadline = (c: Cand) => !!c.deadline_at && now() <= new Date(c.deadline_at).getTime() + GRACE_MS;
 
@@ -107,7 +112,8 @@ async function candidateAction(req: Request, ctx: Ctx, body: Record<string, any>
       if (!k.rules || !k.camera || !k.screen || !k.privacy) return ctx.fail("Please tick every box to continue.");
       const t = now();
       await A.update({
-        accepted_at: iso(t), deadline_at: iso(t + TAKEHOME_HOURS * 3600_000), status: "accepted",
+        // Single sitting: they may start any time until the link expires. Old take-home packs: 48 hours.
+        accepted_at: iso(t), deadline_at: hasTakehome(c) ? iso(t + TAKEHOME_HOURS * 3600_000) : c.link_expires_at, status: "accepted",
         consent: { ...k, typed_name: String(k.typed_name || "").slice(0, 120), at: iso(t), ...device(req) },
       }).eq("id", c.id).is("accepted_at", null);
       return ctx.json({ cand: candView(await reload()) });
@@ -120,7 +126,7 @@ async function candidateAction(req: Request, ctx: Ctx, body: Record<string, any>
         if (!timedLive(c)) return await finishTimed(ctx, c, c.timed_answers, c.integrity, true);
         return ctx.json({ cand: candView(c) });
       }
-      if (!beforeDeadline(c)) return ctx.fail("Your 48 hours have ended, so Part A can't be started.", 410);
+      if (!beforeDeadline(c)) return ctx.fail(hasTakehome(c) ? "Your 48 hours have ended, so Part A can't be started." : "This link has expired, so the test can't be started. Ask us for a new link.", 410);
       const t = now();
       const end = Math.min(t + (c.pack.timed.minutes || 50) * 60_000, new Date(c.deadline_at).getTime());
       await A.update({ timed_started_at: iso(t), timed_deadline_at: iso(end), status: "part_a" }).eq("id", c.id).is("timed_started_at", null);
@@ -235,7 +241,8 @@ async function finishTimed(ctx: Ctx, c: Cand, answers: Record<string, unknown>, 
   const single = qs.filter((q) => q.type === "single");
   marks._numbers = { right: single.filter((q) => marks[q.id].correct).length, of: single.length };
   await ctx.admin.from("candidates").update({
-    timed_answers: answers, integrity, timed_marks: marks, timed_auto: auto, timed_submitted_at: iso(now()), status: "part_a_done",
+    timed_answers: answers, integrity, timed_marks: marks, timed_auto: auto, timed_submitted_at: iso(now()),
+    ...(hasTakehome(c) ? { status: "part_a_done" } : { status: "submitted", submitted_at: iso(now()) }),
   }).eq("id", c.id).is("timed_submitted_at", null);
   const { data } = await ctx.admin.from("candidates").select("*").eq("id", c.id).single();
   return ctx.json({ cand: candView(data as Cand) });

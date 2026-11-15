@@ -15,10 +15,14 @@ function statusOf(c) {
   if (c.accepted_at && !c.submitted_at && c.deadline_at && new Date(c.deadline_at).getTime() < t && !["hire", "second_round", "rejected"].includes(c.status)) return ["Missed deadline", "bad"];
   return STATUS[c.status] || [c.status, ""];
 }
+const hasB = (p) => (p?.takehome?.tasks || []).length > 0;
+const secOf = (q) => q.section || (q.type === "single" ? "A" : "B");
 const link = (token) => `${location.origin}${location.pathname}${X.DEMO ? "?demo" : ""}#/c/${token}`;
 const slug = (s) => String(s || "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 60) || "role";
 function hoursLeft(c) {
-  if (!c.deadline_at || c.submitted_at) return "–";
+  if (c.submitted_at) return "–";
+  if (!hasB(c.pack)) { if (c.timed_started_at) return "Taking it now"; const d = c.deadline_at || c.link_expires_at; return new Date(d).getTime() < Date.now() ? "Expired" : "Start by " + new Date(d).toLocaleDateString(undefined, { day: "numeric", month: "short" }); }
+  if (!c.deadline_at) return "–";
   const ms = new Date(c.deadline_at).getTime() - Date.now();
   return ms <= 0 ? "Ended" : `${Math.floor(ms / 3600_000)}h ${Math.floor((ms % 3600_000) / 60_000)}m`;
 }
@@ -73,10 +77,10 @@ function renderOverview() {
       </div>
       <section class="card"><div class="card-h"><h3>How it works</h3></div>
         <ol class="hw-steps">
-          <li><b>Upload the JD.</b> Claude writes the brief, a live Part A, the take-home tasks, a scorecard and follow-up questions. Check and edit them.</li>
+          <li><b>Upload the JD.</b> Claude writes the brief, quick questions, written tasks, a scorecard and follow-up questions. Check and edit them.</li>
           <li><b>Add a candidate.</b> You get a private link. Send it after the verbal interview.</li>
-          <li><b>They do the work.</b> 48 hours from when they accept. Part A runs live with camera and screen captures; Part B is uploaded.</li>
-          <li><b>Score it.</b> Each task out of 10 with plain descriptions, red flags, then a 20-minute review call with the follow-up questions.</li>
+          <li><b>They take the test.</b> One sitting (about 90 minutes) any time within 7 days, with camera and whole-screen captures. Quick questions are marked automatically; Claude suggests marks for written answers.</li>
+          <li><b>Score it.</b> Each area out of 10 with plain descriptions and red flags, then a 20-minute review call with the follow-up questions.</li>
         </ol></section>
       <section class="card"><div class="card-h"><h3>Roles</h3></div>
         ${roles.length ? `<div class="grid g-2">${roles.map(roleCard).join("")}</div>` : `<div class="empty">No roles yet. <a href="#/hiring/new">Create the first assessment from a JD.</a></div>`}</section>
@@ -100,12 +104,12 @@ function candTable(cs, showRole) {
   const { h, ICON } = X;
   if (!cs.length) return `<div class="empty">No candidates yet.</div>`;
   const roleTitle = (id) => H.data.roles.find((r) => r.id === id)?.title || id;
-  return `<div class="tablebox"><table><thead><tr><th>Candidate</th>${showRole ? "<th>Role</th>" : ""}<th>Status</th><th>Time left</th><th>Part A</th><th>Score</th><th></th></tr></thead><tbody>
+  return `<div class="tablebox"><table><thead><tr><th>Candidate</th>${showRole ? "<th>Role</th>" : ""}<th>Status</th><th>Time left</th><th>Test</th><th>Score</th><th></th></tr></thead><tbody>
     ${cs.map((c) => { const [l, k] = statusOf(c); const sc = c.review?.scores && Object.keys(c.review.scores).length ? computeScore(c.pack, c.review) : null; const nums = c.timed_marks?._numbers;
       return `<tr class="click" data-href="#/hiring/cand/${c.id}"><td><div class="row" style="gap:10px;flex-wrap:nowrap"><span class="avatar">${X.initials(c.full_name)}</span><div><b style="font-weight:500">${h(c.full_name)}</b><div class="xs muted">${h(c.email || "")}</div></div></div></td>
         ${showRole ? `<td class="small">${h(roleTitle(c.role_id))}</td>` : ""}
         <td><span class="chip ${k}">${h(l)}</span></td><td class="mono xs">${hoursLeft(c)}</td>
-        <td class="xs">${c.timed_submitted_at ? `${nums ? `${nums.right}/${nums.of} numbers · ` : ""}${c.integrity?.strikes ? `<span class="chip ${c.integrity.strikes >= 5 ? "bad" : "warn"}">${c.integrity.strikes} strikes</span>` : `<span class="chip good">Clean</span>`}` : "–"}</td>
+        <td class="xs">${c.timed_submitted_at ? `${nums ? `${nums.right}/${nums.of} right · ` : ""}${c.integrity?.strikes ? `<span class="chip ${c.integrity.strikes >= 5 ? "bad" : "warn"}">${c.integrity.strikes} strikes</span>` : `<span class="chip good">Clean</span>`}` : "–"}</td>
         <td>${sc ? `<b>${sc.total}</b><span class="xs muted">/100${sc.complete ? "" : " so far"}</span>` : "–"}</td>
         <td style="text-align:right">${ICON.right.replace("<svg", '<svg style="width:16px;height:16px;color:var(--muted)"')}</td></tr>`; }).join("")}
   </tbody></table></div>`;
@@ -194,7 +198,7 @@ function renderDraft() {
 }
 
 /* ---------------- pack viewer (brief / Part A / scorecard / follow-ups) ---------------- */
-const PACK_TABS = [["brief", "Candidate brief"], ["parta", "Part A + answers"], ["score", "Scorecard"], ["follow", "Follow-up questions"]];
+const PACK_TABS = [["brief", "Candidate brief"], ["parta", "Questions + answers"], ["score", "Scorecard"], ["follow", "Follow-up questions"]];
 function packTabs(pack, tab, where) {
   return `<section class="stack" style="gap:16px" id="pack-view"><div class="tabs" role="tablist">${PACK_TABS.map(([k, l]) => `<button role="tab" class="${tab === k ? "on" : ""}" data-h="pack-tab" data-k="${k}" data-where="${where}">${l}</button>`).join("")}</div>
     <div id="pack-body">${packBody(pack, tab)}</div></section>`;
@@ -217,7 +221,7 @@ function scorecardDoc(pack) {
   return `<div class="stack" style="gap:16px">
     <section class="card stack-s"><h3>How the total works</h3><p class="ink2">${h(sc.decision.notes)}</p>
       <div class="row" style="gap:8px"><span class="chip good">${sc.decision.hire_min}+ Hire</span><span class="chip accent">${sc.decision.second_min}–${sc.decision.hire_min - 1} Second round</span><span class="chip bad">Below ${sc.decision.second_min} Reject</span><span class="chip bad">Any red flag: Reject</span></div></section>
-    ${sc.tasks.map((t) => `<section class="card stack-s"><div class="row between"><h3>${h(t.title)}</h3><span class="row" style="gap:6px"><span class="chip">${t.part === "timed" ? "Part A" : "Part B"}</span><span class="chip gold">Weight ${t.weight}</span></span></div>
+    ${sc.tasks.map((t) => `<section class="card stack-s"><div class="row between"><h3>${h(t.title)}</h3><span class="row" style="gap:6px">${hasB(pack) ? `<span class="chip">${t.part === "timed" ? "Part A" : "Part B"}</span>` : ""}<span class="chip gold">Weight ${t.weight}</span></span></div>
       <span class="eyebrow">Quick checks</span><ul class="hb-list">${t.look_for.map((x) => `<li>${h(x)}</li>`).join("")}</ul>
       <div class="bands">${[["9–10", t.band_10, "good"], ["6–8", t.band_7, "accent"], ["3–5", t.band_4, "warn"], ["0–2", t.band_1, "bad"]].map(([b, txt, k]) => `<div class="band"><span class="chip ${k}">${b}</span><span class="small">${h(txt)}</span></div>`).join("")}</div></section>`).join("")}
     <section class="card stack-s"><h3>Red flags: automatic reject</h3><ul class="hb-list">${sc.red_flags.map((x) => `<li>${h(x)}</li>`).join("")}</ul></section>
@@ -263,7 +267,7 @@ function inviteModal(roleId) {
 }
 function linkModal(name, email, token) {
   const { h } = X; const url = link(token); const first = name.split(" ")[0];
-  const body = `Hi ${first},\n\nThank you for interviewing with Homesly. As the next step, we'd like you to complete a short assessment.\n\nOpen your private link here:\n${url}\n\nIt explains everything. Your 48 hours start when you accept the brief, and Part A needs a laptop or desktop with a webcam (Chrome or Edge). The link works for 14 days.\n\nBest wishes,\nHomesly hiring team`;
+  const body = `Hi ${first},\n\nThank you for interviewing with Homesly. As the next step, we'd like you to take a short online assessment (about 90 minutes in one sitting).\n\nOpen your private link here:\n${url}\n\nYou'll need a laptop or desktop with a webcam, Chrome or Edge, and a quiet room. Your camera and screen are shared during the test. Please take it within the next 7 days, at a time that suits you.\n\nBest wishes,\nHomesly hiring team`;
   X.modal(`<div class="stack"><h3 style="font-size:20px">Private link for ${h(name)}</h3>
     <p class="ink2 small">This link is shown only once, so copy it now. If it's lost, make a new one from the candidate's page (the old link stops working).</p>
     <div class="row" style="gap:8px;flex-wrap:nowrap"><input class="input mono" id="lnk" readonly value="${h(url)}"><button class="btn primary" data-h="copy" data-v="${h(url)}">Copy</button></div>
@@ -288,15 +292,16 @@ function paintCand() {
   X.paint("hiring", `
     <div class="page-h"><div><a href="#/hiring/role/${h(c.role_id)}" class="btn sm ghost" style="margin-left:-12px">${ICON.left}${h(role?.title || p.role_title)}</a>
       <div class="row" style="margin-top:6px"><div class="avatar lg">${X.initials(c.full_name)}</div><div><h1>${h(c.full_name)}</h1><p class="sub">${h([c.email, c.phone].filter(Boolean).join(" · ") || "No contact details")}</p></div><span class="chip ${sk}">${h(sl)}</span></div></div>
-      <div class="row"><button class="btn" data-h="new-link">New link</button>${c.deadline_at && !c.submitted_at ? `<button class="btn" data-h="extend">+24 hours</button>` : ""}
+      <div class="row"><button class="btn" data-h="new-link">New link</button>${c.deadline_at && !c.submitted_at && !c.timed_started_at ? `<button class="btn" data-h="extend">${hasB(c.pack) ? "+24 hours" : "+3 days to start"}</button>` : ""}
         ${H.files.urls[c.cv_path] ? `<a class="btn" href="${h(H.files.urls[c.cv_path])}" target="_blank" rel="noopener">${ICON.clip}CV</a>` : ""}</div></div>
     <div class="stack" style="gap:20px">
+      ${c.timed_submitted_at ? summary(c) : ""}
       ${timeline(c)}
       ${c.notes ? `<section class="card stack-s"><h3>Interview notes</h3><p class="ink2" style="white-space:pre-wrap">${h(c.notes)}</p></section>` : ""}
       ${c.timed_started_at ? integrity(c) : ""}
       ${c.timed_started_at ? captures() : ""}
       ${c.timed_submitted_at ? partA(c) : ""}
-      ${c.accepted_at ? partB(c) : ""}
+      ${c.accepted_at && hasB(c.pack) ? partB(c) : ""}
       ${scoreForm(c)}
       ${followups(c)}
       <section class="card stack-s"><h3>Privacy</h3><p class="small ink2">Captures and files are private and only reachable through short-lived links. Delete them once you've decided (the candidate was told: within 6 months).</p>
@@ -304,11 +309,29 @@ function paintCand() {
     </div>`);
   bindScoreForm();
 }
+function summary(c) {
+  const { h } = X; const m = c.timed_marks || {}; const n = m._numbers; const ig = c.integrity || {};
+  const written = c.pack.timed.questions.filter((q) => q.type === "short").map((q) => m[q.id]?.score).filter(Number.isFinite);
+  const wAvg = written.length ? Math.round((10 * written.reduce((a, b) => a + b, 0)) / written.length) / 10 : null;
+  const s = computeScore(c.pack, H.review);
+  const ips = new Set((c.devices || []).map((d) => d.ip)).size;
+  const mins = c.timed_submitted_at && c.timed_started_at ? Math.round((new Date(c.timed_submitted_at) - new Date(c.timed_started_at)) / 60000) : null;
+  return `<section class="card stack"><div class="card-h" style="margin:0"><h3>At a glance</h3>${s.rec ? `<span class="chip ${s.rec[1]}">Scorecard says: ${s.rec[0]} · ${s.total}/100</span>` : `<span class="xs muted">Score the areas below to get a recommendation</span>`}</div>
+    <div class="sum-grid">
+      <div class="kpi"><span class="eyebrow">Quick questions</span><span class="v">${n ? `${n.right}<small>/${n.of}</small>` : "–"}</span><span class="d">${n ? Math.round((100 * n.right) / Math.max(1, n.of)) + "% right" : ""}</span></div>
+      <div class="kpi"><span class="eyebrow">Written (AI suggestion)</span><span class="v">${wAvg == null ? "–" : `${wAvg}<small>/10</small>`}</span><span class="d">Average over ${written.length} answers</span></div>
+      <div class="kpi"><span class="eyebrow">Integrity</span><span class="v">${ig.strikes || 0}<small> strikes</small></span><span class="d">${(ig.tabAways || 0)} page leaves${ips > 1 ? ` · ${ips} connections` : ""}</span></div>
+      <div class="kpi"><span class="eyebrow">Time used</span><span class="v">${mins == null ? "–" : `${mins}<small> min</small>`}</span><span class="d">${c.timed_auto ? "Submitted automatically" : "Submitted by them"}</span></div>
+    </div>
+    <p class="xs muted">The AI marks are a first opinion. Read the written answers, then set your own scores in the scorecard.</p></section>`;
+}
 function timeline(c) {
   const { h } = X; const w = (d) => (d ? new Date(d).toLocaleString(undefined, { weekday: "short", day: "numeric", month: "short", hour: "numeric", minute: "2-digit" }) : null);
-  const steps = [["Invited", w(c.created_at)], ["Accepted the brief", w(c.accepted_at)], ["Started Part A", w(c.timed_started_at)], ["Submitted Part A", w(c.timed_submitted_at) && w(c.timed_submitted_at) + (c.timed_auto ? " (automatic)" : "")], ["Submitted everything", w(c.submitted_at)]];
-  return `<section class="card"><div class="card-h"><h3>Progress</h3>${c.deadline_at ? `<span class="xs muted">Deadline ${h(w(c.deadline_at))} · ${hoursLeft(c)} left</span>` : `<span class="xs muted">Link valid until ${h(w(c.link_expires_at))}</span>`}</div>
-    <ol class="tl-steps">${steps.map(([l, v]) => `<li class="${v ? "done" : ""}"><b>${l}</b><span class="xs muted">${v ? h(v) : "Not yet"}</span></li>`).join("")}</ol></section>`;
+  const steps = hasB(c.pack)
+    ? [["Invited", w(c.created_at)], ["Accepted the brief", w(c.accepted_at)], ["Started Part A", w(c.timed_started_at)], ["Submitted Part A", w(c.timed_submitted_at) && w(c.timed_submitted_at) + (c.timed_auto ? " (automatic)" : "")], ["Submitted everything", w(c.submitted_at)]]
+    : [["Invited", w(c.created_at)], ["Opened and agreed", w(c.accepted_at)], ["Started the test", w(c.timed_started_at)], ["Submitted", w(c.timed_submitted_at) && w(c.timed_submitted_at) + (c.timed_auto ? " (automatic)" : "")]];
+  return `<section class="card"><div class="card-h"><h3>Progress</h3>${c.deadline_at && hasB(c.pack) ? `<span class="xs muted">Deadline ${h(w(c.deadline_at))} · ${hoursLeft(c)} left</span>` : c.deadline_at ? `<span class="xs muted">Must start by ${h(w(c.deadline_at))}</span>` : `<span class="xs muted">Link valid until ${h(w(c.link_expires_at))}</span>`}</div>
+    <ol class="tl-steps" style="grid-template-columns:repeat(${steps.length},minmax(0,1fr))">${steps.map(([l, v]) => `<li class="${v ? "done" : ""}"><b>${l}</b><span class="xs muted">${v ? h(v) : "Not yet"}</span></li>`).join("")}</ol></section>`;
 }
 const EV_KIND = { "face-none": "bad", "face-multi": "bad", "face-side": "bad", "face-down": "bad", "left-page": "warn", "fullscreen-exit": "warn", "idle-unanswered": "warn", "camera-stopped": "bad", "screen-stopped": "bad", "paste-blocked": "warn", "copy-blocked": "info" };
 function integrity(c) {
@@ -318,7 +341,7 @@ function integrity(c) {
   const st = strikes === 0 ? ["No strikes", "good"] : strikes >= 5 ? ["Auto-submitted after 5 strikes", "bad"] : [`${strikes} strike${strikes > 1 ? "s" : ""}`, "warn"];
   const count = (t) => evs.filter((e) => e.type === t).length;
   return `<section class="card stack">
-    <div class="card-h" style="margin:0"><div><h3>Part A integrity</h3><p class="xs muted" style="margin-top:2px">Warnings are signals, not proof. Look at the captures before deciding.</p></div><span class="chip ${st[1]}">${st[0]}</span></div>
+    <div class="card-h" style="margin:0"><div><h3>${hasB(c.pack) ? "Part A integrity" : "Test integrity"}</h3><p class="xs muted" style="margin-top:2px">Warnings are signals, not proof. Look at the captures before deciding.</p></div><span class="chip ${st[1]}">${st[0]}</span></div>
     <div class="grid g-4" style="gap:12px">
       <div class="kpi"><span class="eyebrow">Left the page</span><span class="mono">${ig.tabAways || 0}×</span></div>
       <div class="kpi"><span class="eyebrow">Face warnings</span><span class="mono">${evs.filter((e) => /^face-/.test(e.type) && e.strike).length}</span></div>
@@ -326,7 +349,7 @@ function integrity(c) {
       <div class="kpi"><span class="eyebrow">Paste attempts</span><span class="mono">${ig.pastes || 0}</span></div>
     </div>
     ${ips.length > 1 ? `<div class="notice warn">Used ${ips.length} different internet connections during the assessment. That can be innocent (Wi-Fi to phone hotspot), but ask about it.</div>` : ""}
-    ${evs.length ? `<div class="tl" role="img" aria-label="Events across Part A">${evs.map((e) => `<i class="${EV_KIND[e.type] || "info"}" style="left:${Math.min(99, (100 * e.t) / total)}%" data-tip="${fmtClock(e.t * 1000)} · ${h(e.detail)}"></i>`).join("")}</div>
+    ${evs.length ? `<div class="tl" role="img" aria-label="Events across the test">${evs.map((e) => `<i class="${EV_KIND[e.type] || "info"}" style="left:${Math.min(99, (100 * e.t) / total)}%" data-tip="${fmtClock(e.t * 1000)} · ${h(e.detail)}"></i>`).join("")}</div>
       <div class="row between xs muted mono"><span>0:00</span><span>${fmtClock(total * 1000)}</span></div>
       <details><summary class="small" style="cursor:pointer">All ${evs.length} events</summary>${evs.map((e) => `<div class="ev"><span class="t">${fmtClock(e.t * 1000)}</span>${e.strike ? `<span class="chip ${EV_KIND[e.type] === "bad" ? "bad" : "warn"}">Strike ${e.strike}</span>` : `<span class="chip">Logged</span>`}<span class="grow">${h(e.detail)}</span></div>`).join("")}</details>`
       : `<p class="small muted">No warnings. Camera, face, tab and screen checks ran the whole time.</p>`}
@@ -343,6 +366,24 @@ function captures() {
   </section>`;
 }
 function partA(c) {
+  const qs = c.pack.timed.questions;
+  if (!qs.some((q) => q.section)) return partAOld(c);
+  const { h } = X; const m = c.timed_marks || {}; const a = c.timed_answers || {}; const n = m._numbers;
+  const mcq = qs.map((q, i) => [q, i]).filter(([q]) => q.type === "single");
+  const wr = qs.map((q, i) => [q, i]).filter(([q]) => q.type === "short");
+  return `<section class="card stack"><div class="card-h" style="margin:0"><h3>Section 1 · quick questions</h3>${n ? `<span class="chip ${n.right >= n.of * 0.75 ? "good" : n.right >= n.of / 2 ? "warn" : "bad"}">${n.right} of ${n.of} right</span>` : ""}</div>
+    <div class="tablebox"><table class="mcq-table"><thead><tr><th>#</th><th>Question</th><th>Their answer</th><th></th></tr></thead><tbody>
+    ${mcq.map(([q, i]) => { const ans = a[q.id]; const ok = m[q.id]?.correct; return `<tr><td>${i + 1}</td><td>${h(q.prompt)}</td><td>${ans == null ? '<span class="muted">No answer</span>' : h(q.options[ans])}${ok || ans == null ? "" : `<div class="xs muted">Right answer: ${h(q.options[q.answer])}</div>`}</td><td>${ans == null ? '<span class="chip">–</span>' : ok ? '<span class="chip good">✓</span>' : '<span class="chip bad">✗</span>'}</td></tr>`; }).join("")}
+    </tbody></table></div></section>
+  <section class="card stack"><div class="card-h" style="margin:0"><div><h3>Section 2 · written answers</h3><p class="xs muted" style="margin-top:2px">Click each one to read the answer, the AI note and what a good answer has.</p></div></div>
+    <div>${wr.map(([q, i]) => { const mk = m[q.id] || {}; const ans = a[q.id]; const wc = (String(ans || "").match(/\S+/g) || []).length;
+      return `<details class="wr"><summary><span class="qno" style="font-size:18px">${String(i + 1).padStart(2, "0")}</span><span class="grow" style="font-weight:500">${h(q.prompt)}</span>${Number.isFinite(mk.score) ? `<span class="chip ${mk.score >= 7 ? "good" : mk.score >= 5 ? "warn" : "bad"}">${mk.ai ? "AI " : ""}${mk.score}/10</span>` : '<span class="chip warn">Not marked</span>'}<span class="xs muted">${wc} words</span></summary>
+        <div class="rv">${q.context ? `<div class="hb-context">${q.context.split("\n").map((l) => `<div>${h(l)}</div>`).join("")}</div>` : ""}
+        <div class="ans"><span class="k">Their answer</span><span style="white-space:pre-wrap">${h(ans || "No answer")}</span></div>
+        ${mk.reason ? `<p class="why"><b>${mk.ai ? "AI note." : "Note."}</b> ${h(mk.reason)}</p>` : ""}
+        <p class="why"><b>A good answer.</b> ${h(q.guide)}</p></div></details>`; }).join("")}</div></section>`;
+}
+function partAOld(c) {
   const { h } = X; const qs = c.pack.timed.questions; const m = c.timed_marks || {}; const a = c.timed_answers || {};
   const nums = m._numbers;
   return `<section class="card stack"><div class="card-h" style="margin:0"><h3>Part A answers</h3>${nums ? `<span class="chip ${nums.right === nums.of ? "good" : nums.right >= nums.of / 2 ? "warn" : "bad"}">Numbers: ${nums.right} of ${nums.of} right</span>` : ""}</div>
@@ -368,15 +409,19 @@ function partB(c) {
     <p class="xs muted">Open links in a private window to check they work for anyone with the link. Paste one caption sentence into Google to spot copying.</p></section>`;
 }
 function suggestFor(c, t) {
-  const m = c.timed_marks || {}; const qs = c.pack.timed.questions.filter((q) => q.task_id === t.id && q.type === "short");
-  const vals = qs.map((q) => m[q.id]?.score).filter(Number.isFinite);
-  return vals.length ? Math.round(vals.reduce((a, b) => a + b, 0) / vals.length) : null;
+  const m = c.timed_marks || {}; const qs = c.pack.timed.questions.filter((q) => q.task_id === t.id);
+  const mcq = qs.filter((q) => q.type === "single" && m[q.id]);
+  const wr = qs.filter((q) => q.type === "short").map((q) => m[q.id]?.score).filter(Number.isFinite);
+  const parts = [];
+  if (mcq.length) parts.push((10 * mcq.filter((q) => m[q.id].correct).length) / mcq.length);
+  if (wr.length) parts.push(wr.reduce((a, b) => a + b, 0) / wr.length);
+  return parts.length ? Math.round(parts.reduce((a, b) => a + b, 0) / parts.length) : null;
 }
 function scoreForm(c) {
   const { h } = X; const p = c.pack; const r = H.review; const s = computeScore(p, r);
   return `<section class="card stack" id="scoreform"><div class="card-h" style="margin:0"><div><h3>Scorecard</h3><p class="xs muted" style="margin-top:2px">Score each task out of 10. Click the description that fits best, then adjust.</p></div></div>
     ${p.scorecard.tasks.map((t) => { const v = r.scores[t.id]; const sug = suggestFor(c, t);
-      return `<div class="sc-task"><div class="row between"><div><b style="font-size:15.5px">${h(t.title)}</b> <span class="xs muted">${t.part === "timed" ? "Part A" : "Part B"} · weight ${t.weight}</span></div>
+      return `<div class="sc-task"><div class="row between"><div><b style="font-size:15.5px">${h(t.title)}</b> <span class="xs muted">${hasB(p) ? (t.part === "timed" ? "Part A · " : "Part B · ") : ""}weight ${t.weight}</span></div>
         <div class="row" style="gap:8px">${sug != null ? `<span class="xs muted">AI suggests ${sug}</span>` : ""}<span class="sc-val">${Number.isFinite(v) ? v : "–"}<small>/10</small></span></div></div>
         <ul class="hb-list sc-look">${t.look_for.map((x) => `<li>${h(x)}</li>`).join("")}</ul>
         <div class="bands">${[[9, "9–10", t.band_10, "good"], [7, "6–8", t.band_7, "accent"], [4, "3–5", t.band_4, "warn"], [1, "0–2", t.band_1, "bad"]].map(([n, b, txt, k]) => { const on = Number.isFinite(v) && (n === 9 ? v >= 9 : n === 7 ? v >= 6 && v <= 8 : n === 4 ? v >= 3 && v <= 5 : v <= 2);
@@ -432,7 +477,7 @@ document.addEventListener("click", async (e) => {
       if (d.armed !== "1") { el.dataset.armed = "1"; el.textContent = "Old link stops working. Click again"; setTimeout(() => { if (el.isConnected) { el.dataset.armed = ""; el.textContent = "New link"; } }, 4000); return; }
       try { const out = await X.HAPI.newLink(H.cand.id); linkModal(H.cand.full_name, H.cand.email, out.token); } catch (x) { X.toast(x.message); } return;
     }
-    case "extend": try { await X.HAPI.extend(H.cand.id, 24); X.toast("Deadline extended by 24 hours."); return renderCand(H.cand.id); } catch (x) { X.toast(x.message); } return;
+    case "extend": try { const hrs = hasB(H.cand.pack) ? 24 : 72; await X.HAPI.extend(H.cand.id, hrs); X.toast(hrs === 24 ? "Deadline extended by 24 hours." : "They now have 3 more days to start."); return renderCand(H.cand.id); } catch (x) { X.toast(x.message); } return;
     case "cap-filter": H.capFilter = d.k; readReview(); return paintCand();
     case "cap-open": { const u = H.files.urls[d.path]; const x = (H.files.captures || []).find((y) => y.path === d.path); if (!u) return;
       X.modal(`<div class="stack"><div class="row between"><b>${x?.kind === "cam" ? "Camera" : "Screen"} · ${X.fmtClock((x?.t || 0) * 1000)}${x && !["interval", "start"].includes(x.reason) ? ` · ${X.h(x.reason)}` : ""}</b><button class="btn sm" data-h="close">Close</button></div><img src="${X.h(u)}" alt="" style="width:100%;border-radius:10px"></div>`);
